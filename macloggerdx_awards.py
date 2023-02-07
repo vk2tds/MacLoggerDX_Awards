@@ -19,6 +19,7 @@ import logging
 import logging.handlers
 import pprint
 import sys
+import re 
 
 # Change root logger level from WARNING (default) to NOTSET in order for all messages to be delegated.
 logging.getLogger().setLevel(logging.NOTSET)
@@ -116,13 +117,16 @@ conn = sqlite3.connect ("/Users/darryl/Documents/MLDX_Logs/MacLoggerDX.sql")
 
 
 cur = conn.cursor()
-#res = cur.execute ('select count(*) from qso_table_v007')
-#print (res.fetchall())
 
 
-#expr = conditions['startDXCC'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTW'] + conditions['end']
-#res = cur.execute (expr)
-#print (res.fetchone())
+def doCQWAZ_MIXED ():
+    global awards
+
+    log.info ("      Mixed - Any Mode, Any Band")
+    expr = conditions['startCQWAZ'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTWeQSL'] + conditions['end']
+    res = cur.execute (expr)
+    awards['CQWAZ_MIXED'] = res.fetchone()[0]
+    log.info ("        Confirmed (/40) - %s" %(awards['CQWAZ_MIXED']))
 
 
 def doCQWAZ_BAND(band):
@@ -152,6 +156,15 @@ def doCQWAZ_MODE (mode):
     awards['CQWAZ_' + mode] = res.fetchone()[0]
     log.info ("        Confirmed (/40) - %s" %(awards['CQWAZ_' + mode]))
 
+def doDXCC_MIXED():
+    global awards
+    log.info ("      Mixed - Any Mode, Any Band")
+    expr = conditions['startDXCC'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTW'] + conditions['end']
+    res = cur.execute (expr)
+    awards['DXCC_MIXED'] = res.fetchone()[0]
+    log.info ("        Confirmed (/100) - %s" %(awards['DXCC_MIXED']))
+
+
 def doDXCC_MODE(mode):
     global awards
 
@@ -179,14 +192,10 @@ awards = {}
 log.info ("DXCC: General Conditions")
 log.info ("      LoTW or Paper QSL Cards only")
 log.info ("      No Maritime Mobile")
-log.info ("      No Repeaters")
-log.info ("      No Satellite ")
-log.info ("      Mixed - Any Mode, Any Band")
-expr = conditions['startDXCC'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTW'] + conditions['end']
-res = cur.execute (expr)
-awards['DXCC_MIXED'] = res.fetchone()[0]
-log.info ("        Confirmed (/100) - %s" %(awards['DXCC_MIXED']))
+log.info ("      No Repeaters - Assuming None")
+log.info ("      No Satellite - Assuming none")
 
+doDXCC_MIXED ()
 doDXCC_MODE ("PHONE")
 doDXCC_MODE ("CW")
 doDXCC_MODE ("DATA")
@@ -201,7 +210,7 @@ doDXCC_BAND ("12M")
 doDXCC_BAND ("10M")
 doDXCC_BAND ("6M")
 doDXCC_BAND ("2M")
-log.info ("      Satellite Now Permitted")
+log.info ("      Satellite Now Permitted - Still not checked")
 doDXCC_BAND ("70CM")
 doDXCC_BAND ("23CM")
 doDXCC_BAND ("12CM")
@@ -226,12 +235,16 @@ log.info ("CQ WAZ: General Conditions")
 log.info ("      LoTW, eQSL or Paper QSL Cards only")
 log.info ("      No Satellite ")
 log.info ("      ***Assuming all eQSL is Authenticity Guarenteed***")
+log.info ("      ***Assuming no satellite***")
+log.info ("      ***Assuming dates OK***")
 
-log.info ("      Mixed - Any Mode, Any Band")
-expr = conditions['startCQWAZ'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTWeQSL'] + conditions['end']
-res = cur.execute (expr)
-awards['CQWAZ_MIXED'] = res.fetchone()[0]
-log.info ("        Confirmed (/40) - %s" %(awards['CQWAZ_MIXED']))
+
+
+
+
+
+doCQWAZ_MIXED ()
+
 
 log.info ("      SSTV - Any Mode, Any Band")
 log.info ("      Satellite - Any Mode, Any Band")
@@ -257,3 +270,38 @@ doCQWAZ ("6M")
 
 
 pp.pprint (awards)
+
+
+
+
+def doCQWPX():
+    global awards
+
+    log.info ("      WPX - Any Mode" )
+    #expr = conditions['startDXCC'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTW'] +  " band_rx = '" + band + "' and " + conditions['end']
+    expr = "select DISTINCT call from qso_table_v007 order by call"
+    res = cur.execute (expr)
+    
+    prefixes = {}
+    calls = res.fetchall()
+    # https://regex101.com
+    for c, in calls:
+        r = re.search ("^[A-Z]+[0-9]+", c)
+        print (c, r)
+        if r is not None:
+            prefixes [c] = r.group()
+            #print (r.group())
+        else:
+            r = re.search("^[0-9][A-Z]+[0-9]+", c)
+            prefixes [c] = r.group()
+            print (r.group())
+        #"$+[A-Z]+[0-9]"
+        #if c[1].isdigit():
+        #    log.info (c)
+
+    #awards['DXCC_' + band] = res.fetchone()[0]
+    #log.info ("        Confirmed (/100) - %s" %(awards['DXCC_' + band]))
+
+log.info ("CQ WPX: General Conditions")
+doCQWPX()
+
