@@ -137,7 +137,11 @@ def doCQWAZ_BAND(band):
     log.info ("      %s - Per Mode, Any Band" %(band))
     expr = conditions['startCQWAZ_BAND'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTWeQSL'] + " band_rx = '" + band + "' and " + conditions['end'] + conditions['stopCQWAZ_BAND']
     res = cur.execute (expr)
-    awards['CQWAZ_' + band] = res.fetchall()
+    w = res.fetchall()
+    x = []
+    for a,b,c in w:
+        x.append (((a,40),b,c))
+    awards['CQWAZ_' + band] = x
     log.info ("        Confirmed (/40) - %s" %(awards['CQWAZ_' + band]))
 
 def doCQWAZ(band):
@@ -173,7 +177,7 @@ def doDXCC_MODE(mode):
     log.info ("      %s - Not Digital, Any Band" % (mode))
     expr = conditions['startDXCC'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTW'] + conditions[mode] + conditions['end']
     res = cur.execute (expr)
-    awards['DXCC_' + mode] = (res.fetchone()[0],0)
+    awards['DXCC_' + mode] = (res.fetchone()[0],100)
     log.info ("        Confirmed (/100) - %s" %(awards['DXCC_' + mode][0]))
 
 def doDXCC_BAND(band):
@@ -181,7 +185,7 @@ def doDXCC_BAND(band):
 
     expr = conditions['startDXCC'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTW'] +  " band_rx = '" + band + "' and " + conditions['end']
     res = cur.execute (expr)
-    awards['DXCC_' + band] = (res.fetchone()[0],0)
+    awards['DXCC_' + band] = (res.fetchone()[0],100)
     log.info ("      %s - Any Mode" % (band))
     log.info ("        Confirmed (/100) - %s" %(awards['DXCC_' + band][0]))
 
