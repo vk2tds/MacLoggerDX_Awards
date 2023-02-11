@@ -189,6 +189,16 @@ def doDXCC_BAND(band):
     log.info ("      %s - Any Mode" % (band))
     log.info ("        Confirmed (/100) - %s" %(awards['DXCC_' + band][0]))
 
+def doDXCC_MISSINGQSL():
+    global awards
+
+
+    expr = "SELECT distinct dxcc_country FROM qso_table_v007 where " + conditions['no_maritime'] + " True " + "EXCEPT "
+    expr = expr + "SELECT distinct dxcc_country FROM qso_table_v007 where " + conditions['no_maritime'] + conditions['LoTW'] + " True"
+    res = cur.execute (expr)
+    awards['DXCC_MISSINGQSL'] = res.fetchall()
+    log.info ("        %s" %(awards['DXCC_MISSINGQSL']))
+
 
 def doCQWPX_MODE(mode_desc, count, modes, details):
     global awards
@@ -328,6 +338,7 @@ doDXCC_BAND ("70CM")
 doDXCC_BAND ("23CM")
 doDXCC_BAND ("12CM")
 doDXCC_BAND ("3CM")
+doDXCC_MISSINGQSL ()
 
 
 log.info ("      Satellite - Any Mode, Any Band")
