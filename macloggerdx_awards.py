@@ -41,12 +41,12 @@ conditions = {"no_maritime": " not call like '%/MM' and ",
               "LoTW": " qsl_received like '%LoTW%' and ",
               "eQSL": " qsl_received like '%eQSL%' and ",
               "LoTWeQSL": " (qsl_received like '%LoTW%' or qsl_received like '%eQSL%') and ",
-              "startDXCC": "select count (distinct dxcc_country) ",
-              "startCQWAZ": "select count (distinct cq_zone) ",
-              "startCQWAZ_BAND": "select distinct count(*), mode , band_rx from ( select  count(*) as c, cq_zone, mode, band_rx ",
-              "stopCQWAZ_BAND": " group by  cq_zone, mode, band_rx ) group by mode, band_rx",
-              "from": "from qso_table_v007  where ",
-              "end": "True"}
+              "startDXCC": " select count (distinct dxcc_country) ",
+              "startCQWAZ": " select count (distinct cq_zone) ",
+              "startCQWAZ_BAND": " select distinct count(*), mode , band_rx from ( select  count(*) as c, cq_zone, mode, band_rx ",
+              "stopCQWAZ_BAND": " group by  cq_zone, mode, band_rx ) group by mode, band_rx ",
+              "from": " from qso_table_v007  where ",
+              "end": " True "}
 
 # mode == FT8, USB, LSB, etc
 # band_tx == 20M
@@ -69,6 +69,9 @@ ssb_mode = ["LSB", "LSB Sync", "USB", "USB Sync"]
 rtty_mode = ["RTTY", "RTTY-R", "RTTY-L", "RTTY-U"]
 
 all_mode = data_mode + cw_mode + phone_mode 
+
+#ToDO Extend this
+bands = ["160M", "80M", "40M", "30M", "20M", "17M", "15M", "12M", "10M", "6M", "2M", "70CM"]
 
 data_statement = " (False "
 for d in data_mode:
@@ -117,8 +120,70 @@ conn = sqlite3.connect ("/Users/darryl/Documents/MLDX_Logs/MacLoggerDX.sql")
 
 
 
-
 cur = conn.cursor()
+
+
+
+def doSTATS_QSL ():
+    global awards
+
+    log.info ("      Any mode, No Maritime")
+    expr = "With A as "
+    expr += "(select  count(call) as COUNT_ALL "
+    expr += conditions['from']
+    expr += conditions['no_maritime'] + " True), "
+
+    expr += "B as "
+    expr += "(select  count(call) as COUNT_LOTW "
+    expr += conditions['from']
+    expr += conditions['LoTW']
+    expr += conditions['no_maritime'] + " True), "
+
+    expr += "C as "
+    expr += "(select  count(call) as COUNT_EQSL "
+    expr += conditions['from']
+    expr += conditions['eQSL']
+    expr += conditions['no_maritime'] + " True), "
+
+    expr += "D as "
+    expr += "(select count(call) as COUNT_LOTWEQSL " 
+    expr += conditions['from']
+    expr += conditions['LoTWeQSL']
+    expr += conditions['no_maritime'] + " True) "
+    expr += " select * from A, B, C, D"
+
+    res = cur.execute (expr)
+    awards['STATS_QSL'] = (res.fetchone())
+    log.info ("        Total, LoTW, eQSL, LOTW+eQSL - %s" %(awards['CQWAZ_MIXED'][0]))
+
+
+
+def doSTATS_BANDS ():
+    global awards
+
+    log.info ("      QSO by Band")
+    expr = "select count(*), band_rx "
+    expr += conditions ['from']
+    expr += " true group by band_rx"
+
+    res = cur.execute (expr)
+    awards['STATS_BANDS'] = res.fetchall()
+    log.info ("        Bands - %s" %(['STATS_BANDS']))
+
+def doSTATS_MODES ():
+    global awards
+
+    log.info ("      QSO by Mode")
+    expr = "select count(*), mode "
+    expr += conditions ['from']
+    expr += " true group by mode"
+
+    res = cur.execute (expr)
+    awards['STATS_MODES'] = res.fetchall()
+    log.info ("        Modes - %s" %(['STATS_MODES']))
+
+
+
 
 
 def doCQWAZ_MIXED ():
@@ -413,8 +478,9 @@ log.info ("      Asia America" )
 log.info ("      Oceania America" )
 
 
-
-
+doSTATS_QSL()
+doSTATS_BANDS()
+doSTATS_MODES()
 
 
 
