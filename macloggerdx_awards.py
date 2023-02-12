@@ -357,7 +357,7 @@ def doCQWPX():
     log.info ("      WPX - Any Mode" )
     #expr = conditions['startDXCC'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTW'] +  " band_rx = '" + band + "' and " + conditions['end']
     expr = "select DISTINCT call, band_rx, mode from qso_table_v007 where " + conditions['LoTW'] + "True"
-    print (expr)
+    #print (expr)
     res = cur.execute (expr)
     
     prefixes = []
@@ -370,8 +370,8 @@ def doCQWPX():
             c = c[:-2]
         if c.find("/") >= 0:
             c = c[0:c.index("/")]
-            if not c[:-1].isnumeric():
-                c = c + "0"
+            if not c[-1].isnumeric(): # If prefix with a / doesnt have a number at the end, add a 0
+                c += "0"
         r = re.search ("^[A-Z]+[0-9]+", c)
         #print (c, r)
         if r is not None:
@@ -443,7 +443,7 @@ log.info ("        Confirmed (/100)= (%s, %s, %s, %s, %s) then (%s, %s, %s, %s, 
 
 log.info ("      DXCC Challenge - Any mode. 160M-6M. 1000 Entries")
 log.info ("        Confirmed (/1000) - %s" % (awards['DXCC_160M'][0] + awards['DXCC_80M'][0] + awards['DXCC_40M'][0] + awards['DXCC_30M'][0] + awards['DXCC_20M'][0] + awards['DXCC_17M'][0] + awards['DXCC_15M'][0] + awards['DXCC_12M'][0] + awards['DXCC_10M'][0] + awards['DXCC_6M'][0]))
-
+awards['DXCC_CHALLENGE'] = (awards['DXCC_160M'][0] + awards['DXCC_80M'][0] + awards['DXCC_40M'][0] + awards['DXCC_30M'][0] + awards['DXCC_20M'][0] + awards['DXCC_17M'][0] + awards['DXCC_15M'][0] + awards['DXCC_12M'][0] + awards['DXCC_10M'][0] + awards['DXCC_6M'][0],1000)
 
 
 log.info ("CQ WAZ: General Conditions")
