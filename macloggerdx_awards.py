@@ -20,6 +20,7 @@ import logging.handlers
 import pprint
 import sys
 import re 
+import datetime
 
 # Change root logger level from WARNING (default) to NOTSET in order for all messages to be delegated.
 logging.getLogger().setLevel(logging.NOTSET)
@@ -71,6 +72,7 @@ rtty_mode = ["RTTY", "RTTY-R", "RTTY-L", "RTTY-U"]
 all_mode = data_mode + cw_mode + phone_mode 
 
 #ToDO Extend this
+# Unused
 bands = ["160M", "80M", "40M", "30M", "20M", "17M", "15M", "12M", "10M", "6M", "2M", "70CM"]
 
 data_statement = " (False "
@@ -127,6 +129,8 @@ cur = conn.cursor()
 def doSTATS_QSL ():
     global awards
 
+    # Compund statement with multiple SQL superimposed on each other
+
     log.info ("      Any mode, No Maritime")
     expr = "With A as "
     expr += "(select  count(call) as COUNT_ALL "
@@ -182,6 +186,31 @@ def doSTATS_MODES ():
     awards['STATS_MODES'] = res.fetchall()
     log.info ("        Modes - %s" %(['STATS_MODES']))
 
+def doSTATS_DXCCBYDATE ():
+    global awards
+
+    log.info ("      DXCC BY DATE")
+    expr = "select dxcc_country, qso_done"
+    expr += conditions ['from'] 
+    expr += " dxcc_country in "
+    expr += "(select DISTINCT dxcc_country "
+    expr += conditions ['from'] 
+    expr += conditions['LoTW']
+    expr += conditions['no_maritime'] + " True) "
+    expr += " AND " + conditions['LoTW']
+    expr += conditions['no_maritime'] + " True "
+    expr += "order by dxcc_country, qso_done"
+
+    res = cur.execute (expr)
+
+    last_dxcc = ""
+    awards['STATS_DXCCBYDATE'] = []
+    for dxcc, day in res.fetchall():
+        if dxcc != last_dxcc:
+            day = str(datetime.datetime.fromtimestamp(day))
+            awards['STATS_DXCCBYDATE'].append ((dxcc, day))
+            last_dxcc = dxcc
+    log.info ("        Modes - %s" %(awards['STATS_DXCCBYDATE']))
 
 
 
@@ -478,10 +507,11 @@ log.info ("      Asia America" )
 log.info ("      Oceania America" )
 
 
+# Not contests but interesting information to show
 doSTATS_QSL()
 doSTATS_BANDS()
 doSTATS_MODES()
-
+doSTATS_DXCCBYDATE()
 
 
 
