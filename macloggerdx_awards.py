@@ -12,8 +12,6 @@
 # Having said that, it would be great to know if this software gets used. If you want, buy me a coffee, or send me some hardware
 # Darryl Smith, VK2TDS. darryl@radio-active.net.au Copyright 2023
 
-
-
 import sqlite3
 import logging
 import logging.handlers
@@ -21,6 +19,7 @@ import pprint
 import sys
 import re 
 import datetime
+import json
 
 # Change root logger level from WARNING (default) to NOTSET in order for all messages to be delegated.
 logging.getLogger().setLevel(logging.NOTSET)
@@ -157,8 +156,10 @@ def doSTATS_QSL ():
     expr += " select * from A, B, C, D"
 
     res = cur.execute (expr)
-    awards['STATS_QSL'] = (res.fetchone())
-    log.info ("        Total, LoTW, eQSL, LOTW+eQSL - %s" %(awards['CQWAZ_MIXED'][0]))
+    details = res.fetchone()
+
+    awards['STATS_QSL'] = {'Total': details[0], 'LoTW_Total': details[1], 'eQSL_Total': details[2], 'LoTWeQSL_Total': details[3]}
+    log.info ("        Total, LoTW, eQSL, LOTW+eQSL - %s" %(awards['CQWAZ_MIXED']['Contacts']))
 
 
 
@@ -171,7 +172,12 @@ def doSTATS_BANDS ():
     expr += " true group by band_rx"
 
     res = cur.execute (expr)
-    awards['STATS_BANDS'] = res.fetchall()
+    details = res.fetchall()
+    combined = []
+    for count, band in details:
+        combined.append ({'Count': count, 'Band': band})
+
+    awards['STATS_BANDS'] = combined
     log.info ("        Bands - %s" %(['STATS_BANDS']))
 
 def doSTATS_MODES ():
@@ -183,7 +189,11 @@ def doSTATS_MODES ():
     expr += " true group by mode"
 
     res = cur.execute (expr)
-    awards['STATS_MODES'] = res.fetchall()
+    details = res.fetchall()
+    combined = []
+    for count, mode in details:
+        combined.append ({'Count': count, 'Mode': mode})
+    awards['STATS_MODES'] = combined
     log.info ("        Modes - %s" %(['STATS_MODES']))
 
 def doSTATS_DXCCBYDATE ():
@@ -208,7 +218,7 @@ def doSTATS_DXCCBYDATE ():
     for dxcc, day in res.fetchall():
         if dxcc != last_dxcc:
             day = str(datetime.datetime.fromtimestamp(day))
-            awards['STATS_DXCCBYDATE'].append ((dxcc, day))
+            awards['STATS_DXCCBYDATE'].append ({'DXCC':dxcc, 'Day':day})
             last_dxcc = dxcc
     log.info ("        Modes - %s" %(awards['STATS_DXCCBYDATE']))
 
@@ -221,8 +231,8 @@ def doCQWAZ_MIXED ():
     log.info ("      Mixed - Any Mode, Any Band")
     expr = conditions['startCQWAZ'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTWeQSL'] + conditions['end']
     res = cur.execute (expr)
-    awards['CQWAZ_MIXED'] = (res.fetchone()[0], 40)
-    log.info ("        Confirmed (/40) - %s" %(awards['CQWAZ_MIXED'][0]))
+    awards['CQWAZ_MIXED'] = {'Contacts':res.fetchone()[0], 'Required':40}
+    log.info ("        Confirmed (/40) - %s" %(awards['CQWAZ_MIXED']['Contacts']))
 
 
 def doCQWAZ_BAND(band):
@@ -234,7 +244,7 @@ def doCQWAZ_BAND(band):
     w = res.fetchall()
     x = []
     for a,b,c in w:
-        x.append (((a,40),b,c))
+        x.append ({'Contacts': a, 'Required':40, 'Band': b, 'Mode': c})
     awards['CQWAZ_' + band] = x
     log.info ("        Confirmed (/40) - %s" %(awards['CQWAZ_' + band]))
 
@@ -244,8 +254,8 @@ def doCQWAZ(band):
     log.info ("      %s - Any Mode, Any Band" % (band))
     expr = conditions['startCQWAZ'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTWeQSL'] + " band_rx = '" + band + "' and " + conditions['end']
     res = cur.execute (expr)
-    awards['CQWAZ_' + band] = (res.fetchone()[0],40)
-    log.info ("        Confirmed (/40) - %s" %(awards['CQWAZ_' + band][0]))
+    awards['CQWAZ_' + band] = {'Contacts':res.fetchone()[0], 'Required':40}
+    log.info ("        Confirmed (/40) - %s" %(awards['CQWAZ_' + band]['Contacts']))
 
 def doCQWAZ_MODE (mode):
     global awards
@@ -253,16 +263,16 @@ def doCQWAZ_MODE (mode):
     log.info ("      %s - Any Mode, Any Band" % (mode))
     expr = conditions['startCQWAZ'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTWeQSL'] + conditions[mode] + conditions['end']
     res = cur.execute (expr)
-    awards['CQWAZ_' + mode] = (res.fetchone()[0],40)
-    log.info ("        Confirmed (/40) - %s" %(awards['CQWAZ_' + mode][0]))
+    awards['CQWAZ_' + mode] = {'Contacts':res.fetchone()[0], 'Required':40}
+    log.info ("        Confirmed (/40) - %s" %(awards['CQWAZ_' + mode]['Contacts']))
 
 def doDXCC_MIXED():
     global awards
     log.info ("      Mixed - Any Mode, Any Band")
     expr = conditions['startDXCC'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTW'] + conditions['end']
     res = cur.execute (expr)
-    awards['DXCC_MIXED'] = (res.fetchone()[0],100)
-    log.info ("        Confirmed (/100) - %s" %(awards['DXCC_MIXED'][0]))
+    awards['DXCC_MIXED'] = {'Contacts':res.fetchone()[0], 'Required':100}
+    log.info ("        Confirmed (/100) - %s" %(awards['DXCC_MIXED']['Contacts']))
 
 
 def doDXCC_MODE(mode):
@@ -271,17 +281,17 @@ def doDXCC_MODE(mode):
     log.info ("      %s - Not Digital, Any Band" % (mode))
     expr = conditions['startDXCC'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTW'] + conditions[mode] + conditions['end']
     res = cur.execute (expr)
-    awards['DXCC_' + mode] = (res.fetchone()[0],100)
-    log.info ("        Confirmed (/100) - %s" %(awards['DXCC_' + mode][0]))
+    awards['DXCC_' + mode] = {'Contacts':res.fetchone()[0], 'Required':100}
+    log.info ("        Confirmed (/100) - %s" %(awards['DXCC_' + mode]['Contacts']))
 
 def doDXCC_BAND(band):
     global awards
 
     expr = conditions['startDXCC'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTW'] +  " band_rx = '" + band + "' and " + conditions['end']
     res = cur.execute (expr)
-    awards['DXCC_' + band] = (res.fetchone()[0],100)
+    awards['DXCC_' + band] = {'Contacts':res.fetchone()[0], 'Required':100}
     log.info ("      %s - Any Mode" % (band))
-    log.info ("        Confirmed (/100) - %s" %(awards['DXCC_' + band][0]))
+    log.info ("        Confirmed (/100) - %s" %(awards['DXCC_' + band]['Contacts']))
 
 def doDXCC_MISSINGQSL():
     global awards
@@ -306,7 +316,7 @@ def doCQWPX_MODE(mode_desc, count, modes, details):
                 #print (prefixes)
                 combined = list(set(combined) | set(prefixes))
                 #count = count + len(prefixes)
-    awards['CQWPX_'+mode_desc] = (len(combined),count)
+    awards['CQWPX_'+mode_desc] = {'Contacts':len(combined), 'Required':count}
     log.info ("      %s - Any Band" % (mode_desc))
     log.info ("        Confirmed (/%s) - %s" %(count, len(combined)))
 
@@ -322,7 +332,7 @@ def doCQWPX_BAND(target_band, count, details):
                 #print (prefixes)
                 combined = list(set(combined) | set(prefixes))
                 #count = count + len(prefixes)
-    awards['CQWPX_'+target_band] = (len(combined), count)
+    awards['CQWPX_'+target_band] = {'Contacts':len(combined), 'Required':count}
 
     log.info ("      %s - Any Mode" % (target_band))
     log.info ("        Confirmed (/%s) - %s" %(count, len(combined)))
@@ -390,13 +400,6 @@ def doCQWPX():
                 details[b][m] = []
             if not r.group() in details[b][m]:
                 details[b][m].append(r.group())
-            #"$+[A-Z]+[0-9]"
-        #if c[1].isdigit():
-        #    log.info (c)
-    #pp.pprint (details)
-    #pp.pprint (prefixes)
-    #awards['DXCC_' + band] = res.fetchone()[0]
-    #log.info ("        Confirmed (/100) - %s" %(awards['DXCC_' + band]))
     return details
 
 
@@ -437,13 +440,13 @@ doDXCC_MISSINGQSL ()
 
 log.info ("      Satellite - Any Mode, Any Band")
 log.info ("      5BDXCC - Any Mode, 100 each on 80M, 40M, 20M, 15M, 10M; then endorceable for 160M, 30M, 17M, 12M, 6M, 2M")
-log.info ("        Confirmed (/100)= (%s, %s, %s, %s, %s) then (%s, %s, %s, %s, %s, %s)" % (awards['DXCC_80M'][0], awards['DXCC_40M'][0], awards['DXCC_20M'][0], \
-                   awards['DXCC_15M'][0], awards['DXCC_10M'][0],  awards['DXCC_160M'][0], awards['DXCC_30M'][0], awards['DXCC_17M'][0], awards['DXCC_12M'][0], awards['DXCC_6M'][0], awards['DXCC_2M'][0]))
+log.info ("        Confirmed (/100)= (%s, %s, %s, %s, %s) then (%s, %s, %s, %s, %s, %s)" % (awards['DXCC_80M']['Contacts'], awards['DXCC_40M']['Contacts'], awards['DXCC_20M']['Contacts'], \
+                   awards['DXCC_15M']['Contacts'], awards['DXCC_10M']['Contacts'],  awards['DXCC_160M']['Contacts'], awards['DXCC_30M']['Contacts'], awards['DXCC_17M']['Contacts'], awards['DXCC_12M']['Contacts'], awards['DXCC_6M']['Contacts'], awards['DXCC_2M']['Contacts']))
 
 
 log.info ("      DXCC Challenge - Any mode. 160M-6M. 1000 Entries")
-log.info ("        Confirmed (/1000) - %s" % (awards['DXCC_160M'][0] + awards['DXCC_80M'][0] + awards['DXCC_40M'][0] + awards['DXCC_30M'][0] + awards['DXCC_20M'][0] + awards['DXCC_17M'][0] + awards['DXCC_15M'][0] + awards['DXCC_12M'][0] + awards['DXCC_10M'][0] + awards['DXCC_6M'][0]))
-awards['DXCC_CHALLENGE'] = (awards['DXCC_160M'][0] + awards['DXCC_80M'][0] + awards['DXCC_40M'][0] + awards['DXCC_30M'][0] + awards['DXCC_20M'][0] + awards['DXCC_17M'][0] + awards['DXCC_15M'][0] + awards['DXCC_12M'][0] + awards['DXCC_10M'][0] + awards['DXCC_6M'][0],1000)
+log.info ("        Confirmed (/1000) - %s" % (awards['DXCC_160M']['Contacts'] + awards['DXCC_80M']['Contacts'] + awards['DXCC_40M']['Contacts'] + awards['DXCC_30M']['Contacts'] + awards['DXCC_20M']['Contacts'] + awards['DXCC_17M']['Contacts'] + awards['DXCC_15M']['Contacts'] + awards['DXCC_12M']['Contacts'] + awards['DXCC_10M']['Contacts'] + awards['DXCC_6M']['Contacts']))
+awards['DXCC_CHALLENGE'] = {'Contacts': awards['DXCC_160M']['Contacts'] + awards['DXCC_80M']['Contacts'] + awards['DXCC_40M']['Contacts'] + awards['DXCC_30M']['Contacts'] + awards['DXCC_20M']['Contacts'] + awards['DXCC_17M']['Contacts'] + awards['DXCC_15M']['Contacts'] + awards['DXCC_12M']['Contacts'] + awards['DXCC_10M']['Contacts'] + awards['DXCC_6M']['Contacts'], 'Required': 1000}
 
 
 log.info ("CQ WAZ: General Conditions")
@@ -516,3 +519,6 @@ doSTATS_DXCCBYDATE()
 
 
 pp.pprint (awards)
+
+#j = json.dumps(awards, indent = 8)
+#print (j)
