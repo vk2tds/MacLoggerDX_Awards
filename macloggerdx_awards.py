@@ -73,6 +73,9 @@ rtty_mode = ["RTTY", "RTTY-R", "RTTY-L", "RTTY-U"]
 
 all_mode = data_mode + cw_mode + phone_mode 
 
+oceania = (247,176,489,460,511,190,46,160,157,375,191,234,188,162,512,175,508,509,298,185,507,177,166,20,103,123,174,197,110,138,9,515,297,163,282,301,31,48,490,22,173,168,345,150,153,38,147,171,189,303,35,172,513,327,158,270,170,34,133,16)
+
+
 #ToDO Extend this
 # Unused
 bands = ["160M", "80M", "40M", "30M", "20M", "17M", "15M", "12M", "10M", "6M", "2M", "70CM"]
@@ -459,14 +462,13 @@ def doNZART_NZCENTURYAWARD():
     grids = []
     for grid in details:
         grid = grid[0]
-        print (grid)
+        #print (grid)
         if len(grid) == 6:
             grids.append (grid)
-    print (grid)
+    #print (grid)
 
     awards['NZART']['NZCENTURYAWARD'] = {'Contacts': len(grids), "Required": 100}
     log.info ("    Details %s" % (awards['NZART']['NZCENTURYAWARD']))
-
 
 
 def doNZART_TIKI():
@@ -488,6 +490,32 @@ def doNZART_TIKI():
     log.info ("    Details %s" % (awards['NZART']['TIKI']))
 
 
+
+def doNZART_WORKEDALLPACIFIC():
+    global awards
+    log.info ("NZART: WORKEDALLPACIFIC")
+
+    co = "("
+    for code in oceania:
+        co += " dxcc_id = " + str(code) + " or "
+    co += "false) "
+
+
+    expr = 'select  count(distinct dxcc_country), band_rx  ' + conditions['from'] + co + "group by band_rx"
+    res = cur.execute (expr)
+    details = res.fetchall()
+
+    r = {}
+    c = 0
+    for count, band in details:
+        r[band] = {'Contacts': count, 'Required': 30 }
+        if count >= 30:
+            c += 1
+
+    awards['NZART']['WORKEDALLPACIFIC'] = {'Bands': r, 'BandsQualified': c, 'Required': 5}
+
+    print (expr)
+    print (details)
 
 
 
@@ -618,6 +646,7 @@ log.info ("NZART Awards")
 doNZART_NZAWARD()
 doNZART_NZCENTURYAWARD()
 doNZART_TIKI()
+doNZART_WORKEDALLPACIFIC()
 
 
 
