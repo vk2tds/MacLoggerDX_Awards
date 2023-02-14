@@ -20,6 +20,8 @@ import sys
 import re 
 import datetime
 import json
+from dicttoxml import dicttoxml
+from xml.dom.minidom import parseString
 
 # Change root logger level from WARNING (default) to NOTSET in order for all messages to be delegated.
 logging.getLogger().setLevel(logging.NOTSET)
@@ -30,6 +32,7 @@ console.setLevel(logging.INFO)
 formater = logging.Formatter('%(name)-13s: %(levelname)-8s %(message)s')
 console.setFormatter(formater)
 logging.getLogger().addHandler(console)
+logging.getLogger("dicttoxml").setLevel(logging.WARNING)
 
 log = logging.getLogger("app." + __name__)
 
@@ -300,7 +303,8 @@ def doDXCC_MISSINGQSL():
     expr = "SELECT distinct dxcc_country FROM qso_table_v007 where " + conditions['no_maritime'] + " True " + "EXCEPT "
     expr = expr + "SELECT distinct dxcc_country FROM qso_table_v007 where " + conditions['no_maritime'] + conditions['LoTW'] + " True"
     res = cur.execute (expr)
-    awards['ARRL']['DXCC']['DXCC_MISSINGQSL'] = res.fetchall()
+    output = res.fetchall()
+    awards['ARRL']['DXCC']['DXCC_MISSINGQSL'] = {'DXCC': output, 'Count': len(output)}
     log.info ("        %s" %(awards['ARRL']['DXCC']['DXCC_MISSINGQSL']))
 
 
@@ -403,6 +407,88 @@ def doCQWPX():
     return details
 
 
+def doNZART_NZAWARD():
+    global awards
+    log.info ("NZART: NZ AWARD")
+
+    expr = 'select distinct call ' + conditions['from'] + "call like 'ZL%' order by call"
+    res = cur.execute (expr)
+    details = res.fetchall()
+
+    zl = {}
+    zl['ZL1'] = []
+    zl['ZL2'] = []
+    zl['ZL3'] = []
+    zl['ZL4'] = []
+    zl['ZL789'] = []
+
+    # Simplistic. Ignore / for call areas and portable stations
+    # Ignoring ZL6
+    for call in details:
+        if not "/" in call:
+            call = call[0] #Dunno why
+            if call[:3] == 'ZL1':
+                zl['ZL1'].append (call)
+            if call[:3] == 'ZL2':
+                zl['ZL2'].append (call)
+            if call[:3] == 'ZL3':
+                zl['ZL3'].append (call)
+            if call[:3] == 'ZL4':
+                zl['ZL4'].append (call)
+            if call[:3] == 'ZL7' or call[:3] == 'ZL8' or call[:3] == 'ZL9':
+                zl['ZL4'].append (call)
+    all = {}
+    all['ZL1'] = {'Contatcs': len (zl['ZL1']), 'Required': 35}
+    all['ZL2'] = {'Contatcs': len (zl['ZL2']), 'Required': 35}
+    all['ZL3'] = {'Contatcs': len (zl['ZL3']), 'Required': 20}
+    all['ZL4'] = {'Contatcs': len (zl['ZL4']), 'Required': 10}
+    all['ZL789'] = {'Contatcs': len (zl['ZL789']), 'Required': 1, 'Notes': 'Special Conditions'}
+
+    awards['NZART']['NZAWARD'] = all
+
+
+def doNZART_NZCENTURYAWARD():
+    global awards
+    log.info ("NZART: NZ CENTURY AWARD")
+
+    expr = 'select distinct grid ' + conditions['from'] 
+    expr += "call like 'ZL%' and (grid like 'RE%' or grid like 'RF%' or grid like 'QD%' or grid like 'RD%' or grid like 'AE%' or grid like 'AF%') order by grid"
+    res = cur.execute (expr)
+    details = res.fetchall()
+
+    grids = []
+    for grid in details:
+        grid = grid[0]
+        print (grid)
+        if len(grid) == 6:
+            grids.append (grid)
+    print (grid)
+
+    awards['NZART']['NZCENTURYAWARD'] = {'Contacts': len(grids), "Required": 100}
+    log.info ("    Details %s" % (awards['NZART']['NZCENTURYAWARD']))
+
+
+
+def doNZART_TIKI():
+    global awards
+    log.info ("NZART: TIKI")
+
+    expr = "select distinct count(call), band_rx "  + conditions['from'] + " call like '%ZL%' group by band_rx"
+    res = cur.execute (expr)
+    details = res.fetchall()
+
+    r = {}
+    c = 0
+    for count, band in details:
+        r[band] = {'Contacts': count, 'Required': 5 }
+        if count >= 5:
+            c += 1
+
+    awards['NZART']['TIKI'] = {'Bands': r, 'BandsQualified': c, 'Required': 5}
+    log.info ("    Details %s" % (awards['NZART']['TIKI']))
+
+
+
 
 
 
@@ -414,6 +500,11 @@ awards['CQ']['CQWPX'] = {}
 awards['STATS'] = {}
 awards['ARRL'] = {}
 awards['ARRL']['DXCC'] = {}
+awards['NZART'] = {}
+awards['NZART']['NZAWARD'] = {}
+awards['NZART']['NZCENTURYAWARD'] = {}
+awards['NZART']['TIKI'] = {}
+awards['NZART']['WORKEDALLPACIFIC'] = {}
 
 log.info ("DXCC: General Conditions")
 log.info ("      LoTW or Paper QSL Cards only")
@@ -522,15 +613,31 @@ log.info ("      Asia America" )
 log.info ("      Oceania America" )
 
 
+
+log.info ("NZART Awards")
+doNZART_NZAWARD()
+doNZART_NZCENTURYAWARD()
+doNZART_TIKI()
+
+
+
 # Not contests but interesting information to show
 doSTATS_QSL()
 doSTATS_BANDS()
 doSTATS_MODES()
 doSTATS_DXCCBYDATE()
 
+# Does not view well in Safari
+xml = dicttoxml(awards)
+f=open ("demofile2.xml", "w")
+f.write (parseString(xml).toprettyxml())
+f.close()
 
 
 pp.pprint (awards)
 
+pp.pprint (awards['NZART'])
+
 #j = json.dumps(awards, indent = 8)
 #print (j)
+
