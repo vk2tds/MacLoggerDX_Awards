@@ -136,7 +136,7 @@ def doSTATS_QSL ():
 
     # Compund statement with multiple SQL superimposed on each other
 
-    log.info ("      Any mode, No Maritime")
+    #log.info ("      Any mode, No Maritime")
     expr = "With A as "
     expr += "(select  count(call) as COUNT_ALL "
     expr += conditions['from']
@@ -164,15 +164,17 @@ def doSTATS_QSL ():
     res = cur.execute (expr)
     details = res.fetchone()
 
-    awards['STATS']['STATS_QSL'] = {'Total': details[0], 'LoTW_Total': details[1], 'eQSL_Total': details[2], 'LoTWeQSL_Total': details[3]}
-    log.info ("        Total, LoTW, eQSL, LOTW+eQSL - %s" %(awards['STATS']['STATS_QSL']))
+
+    awards['STATS']['STATS_QSL'] = {'Total': details[0], 'LoTW_Total': details[1], 'eQSL_Total': details[2], 'LoTWeQSL_Total': details[3],
+                                    'Notes': ' Any mode, no Maritime'}
+    #log.info ("        Total, LoTW, eQSL, LOTW+eQSL - %s" %(awards['STATS']['STATS_QSL']))
 
 
 
 def doSTATS_BANDS ():
     global awards
 
-    log.info ("      QSO by Band")
+    #log.info ("      QSO by Band")
     expr = "select count(*), band_rx "
     expr += conditions ['from']
     expr += " true group by band_rx"
@@ -184,12 +186,12 @@ def doSTATS_BANDS ():
         combined.append ({'Count': count, 'Band': band})
 
     awards['STATS']['STATS_BANDS'] = combined
-    log.info ("        Bands - %s" %(['STATS_BANDS']))
+    #log.info ("        Bands - %s" %(['STATS_BANDS']))
 
 def doSTATS_MODES ():
     global awards
 
-    log.info ("      QSO by Mode")
+    #log.info ("      QSO by Mode")
     expr = "select count(*), mode "
     expr += conditions ['from']
     expr += " true group by mode"
@@ -200,12 +202,12 @@ def doSTATS_MODES ():
     for count, mode in details:
         combined.append ({'Count': count, 'Mode': mode})
     awards['STATS']['STATS_MODES'] = combined
-    log.info ("        Modes - %s" %(['STATS_MODES']))
+    #log.info ("        Modes - %s" %(['STATS_MODES']))
 
 def doSTATS_DXCCBYDATE ():
     global awards
 
-    log.info ("      DXCC BY DATE")
+    #log.info ("      DXCC BY DATE")
     expr = "select dxcc_country, qso_done"
     expr += conditions ['from'] 
     expr += " dxcc_country in "
@@ -226,7 +228,7 @@ def doSTATS_DXCCBYDATE ():
             day = str(datetime.datetime.fromtimestamp(day))
             awards['STATS']['STATS_DXCCBYDATE'].append ({'DXCC':dxcc, 'Day':day})
             last_dxcc = dxcc
-    log.info ("        Modes - %s" %(awards['STATS']['STATS_DXCCBYDATE']))
+    #log.info ("        Modes - %s" %(awards['STATS']['STATS_DXCCBYDATE']))
 
 
 
@@ -234,17 +236,17 @@ def doSTATS_DXCCBYDATE ():
 def doCQWAZ_MIXED ():
     global awards
 
-    log.info ("      Mixed - Any Mode, Any Band")
+    #log.info ("      Mixed - Any Mode, Any Band")
     expr = conditions['startCQWAZ'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTWeQSL'] + conditions['end']
     res = cur.execute (expr)
     awards['CQ']['CQWAZ']['CQWAZ_MIXED'] = {'Contacts':res.fetchone()[0], 'Required':40}
-    log.info ("        Confirmed (/40) - %s" %(awards['CQ']['CQWAZ']['CQWAZ_MIXED']['Contacts']))
+    #log.info ("        Confirmed (/40) - %s" %(awards['CQ']['CQWAZ']['CQWAZ_MIXED']['Contacts']))
 
 
 def doCQWAZ_BAND(band):
     global awards
 
-    log.info ("      %s - Per Mode, Any Band" %(band))
+    #log.info ("      %s - Per Mode, Any Band" %(band))
     expr = conditions['startCQWAZ_BAND'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTWeQSL'] + " band_rx = '" + band + "' and " + conditions['end'] + conditions['stopCQWAZ_BAND']
     res = cur.execute (expr)
     w = res.fetchall()
@@ -252,7 +254,7 @@ def doCQWAZ_BAND(band):
     for a,b,c in w:
         x.append ({'Contacts': a, 'Required':40, 'Band': b, 'Mode': c})
     awards['CQ']['CQWAZ']['CQWAZ_' + band] = x
-    log.info ("        Confirmed (/40) - %s" %(awards['CQ']['CQWAZ']['CQWAZ_' + band]))
+    #log.info ("        Confirmed (/40) - %s" %(awards['CQ']['CQWAZ']['CQWAZ_' + band]))
 
 def doCQWAZ(band):
     global awards
@@ -295,9 +297,9 @@ def doDXCC_BAND(band):
 
     expr = conditions['startDXCC'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTW'] +  " band_rx = '" + band + "' and " + conditions['end']
     res = cur.execute (expr)
-    awards['ARRL']['DXCC']['DXCC_' + band] = {'Contacts':res.fetchone()[0], 'Required':100}
-    log.info ("      %s - Any Mode" % (band))
-    log.info ("        Confirmed (/100) - %s" %(awards['ARRL']['DXCC']['DXCC_' + band]['Contacts']))
+    awards['ARRL']['DXCC'][band] = {'Contacts':res.fetchone()[0], 'Required':100}
+    #log.info ("      %s - Any Mode" % (band))
+    #log.info ("        Confirmed (/100) - %s" %(awards['ARRL']['DXCC']['DXCC_' + band]['Contacts']))
 
 def doDXCC_MISSINGQSL():
     global awards
@@ -514,8 +516,8 @@ def doNZART_WORKEDALLPACIFIC():
 
     awards['NZART']['WORKEDALLPACIFIC'] = {'Bands': r, 'BandsQualified': c, 'Required': 5}
 
-    print (expr)
-    print (details)
+    #print (expr)
+    #print (details)
 
 
 
@@ -534,11 +536,7 @@ awards['NZART']['NZCENTURYAWARD'] = {}
 awards['NZART']['TIKI'] = {}
 awards['NZART']['WORKEDALLPACIFIC'] = {}
 
-log.info ("DXCC: General Conditions")
-log.info ("      LoTW or Paper QSL Cards only")
-log.info ("      No Maritime Mobile")
-log.info ("      No Repeaters - Assuming None")
-log.info ("      No Satellite - Assuming none")
+awards['ARRL']['DXCC']['Notes'] = "LoTW or Paper QSL Cards only; No Maritime Mobile; No Repeaters - Assuming None; No Satellite - Assuming none"
 
 doDXCC_MIXED ()
 doDXCC_MODE ("PHONE")
@@ -555,28 +553,48 @@ doDXCC_BAND ("12M")
 doDXCC_BAND ("10M")
 doDXCC_BAND ("6M")
 doDXCC_BAND ("2M")
-log.info ("      Satellite Now Permitted - Still not checked")
 doDXCC_BAND ("70CM")
+awards['ARRL']['DXCC']['70CM']['Notes'] = 'Satellites Now Permitted - Still not checked'
 doDXCC_BAND ("23CM")
+awards['ARRL']['DXCC']['23CM']['Notes'] = 'Satellites Now Permitted - Still not checked'
 doDXCC_BAND ("12CM")
+awards['ARRL']['DXCC']['12CM']['Notes'] = 'Satellites Now Permitted - Still not checked'
 doDXCC_BAND ("3CM")
+awards['ARRL']['DXCC']['3CM']['Notes'] = 'Satellites Now Permitted - Still not checked'
+
 doDXCC_MISSINGQSL ()
 
 
 log.info ("      Satellite - Any Mode, Any Band")
-log.info ("      5BDXCC - Any Mode, 100 each on 80M, 40M, 20M, 15M, 10M; then endorceable for 160M, 30M, 17M, 12M, 6M, 2M")
-log.info ("        Confirmed (/100)= (%s, %s, %s, %s, %s) then (%s, %s, %s, %s, %s, %s)" % (awards['ARRL']['DXCC']['DXCC_80M']['Contacts'], \
-                        awards['ARRL']['DXCC']['DXCC_40M']['Contacts'], awards['ARRL']['DXCC']['DXCC_20M']['Contacts'], \
-                        awards['ARRL']['DXCC']['DXCC_15M']['Contacts'], awards['ARRL']['DXCC']['DXCC_10M']['Contacts'],  awards['ARRL']['DXCC']['DXCC_160M']['Contacts'], \
-                        awards['ARRL']['DXCC']['DXCC_30M']['Contacts'], awards['ARRL']['DXCC']['DXCC_17M']['Contacts'], awards['ARRL']['DXCC']['DXCC_12M']['Contacts'], \
-                        awards['ARRL']['DXCC']['DXCC_6M']['Contacts'], awards['ARRL']['DXCC']['DXCC_2M']['Contacts']))
+
+#log.info ("      5BDXCC - Any Mode, 100 each on 80M, 40M, 20M, 15M, 10M; then endorceable for 160M, 30M, 17M, 12M, 6M, 2M")
+#log.info ("        Confirmed (/100)= (%s, %s, %s, %s, %s) then (%s, %s, %s, %s, %s, %s)" % (  )
+
+awards['ARRL']['DXCC']['5BDXCC'] = { 'Notes': 'Any Mode, 100 each on 80M, 40M, 20M, 15M, 10M; then endorceable for 160M, 30M, 17M, 12M, 6M, 2M'}
+
+awards['ARRL']['DXCC']['5BDXCC']['Primary'] = {}
+awards['ARRL']['DXCC']['5BDXCC']['Primary']['80M'] = {'Contacts': awards['ARRL']['DXCC']['80M']['Contacts'], 'Count':100}
+awards['ARRL']['DXCC']['5BDXCC']['Primary']['40M'] = {'Contacts': awards['ARRL']['DXCC']['40M']['Contacts'], 'Count':100}
+awards['ARRL']['DXCC']['5BDXCC']['Primary']['20M'] = {'Contacts': awards['ARRL']['DXCC']['20M']['Contacts'], 'Count':100}
+awards['ARRL']['DXCC']['5BDXCC']['Primary']['15M'] = {'Contacts': awards['ARRL']['DXCC']['15M']['Contacts'], 'Count':100}
+awards['ARRL']['DXCC']['5BDXCC']['Primary']['10M'] = {'Contacts': awards['ARRL']['DXCC']['10M']['Contacts'], 'Count':100}
+
+awards['ARRL']['DXCC']['5BDXCC']['Endorcements'] = {}
+awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['160M'] = {'Contacts': awards['ARRL']['DXCC']['160M']['Contacts'], 'Count':100}
+awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['30M'] = {'Contacts': awards['ARRL']['DXCC']['30M']['Contacts'], 'Count':100}
+awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['17M'] = {'Contacts': awards['ARRL']['DXCC']['17M']['Contacts'], 'Count':100}
+awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['12M'] = {'Contacts': awards['ARRL']['DXCC']['12M']['Contacts'], 'Count':100}
+awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['6M'] = {'Contacts': awards['ARRL']['DXCC']['6M']['Contacts'], 'Count':100}
+awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['2M'] = {'Contacts': awards['ARRL']['DXCC']['2M']['Contacts'], 'Count':100}
 
 
-log.info ("      DXCC Challenge - Any mode. 160M-6M. 1000 Entries")
-challenge = awards['ARRL']['DXCC']['DXCC_160M']['Contacts'] + awards['ARRL']['DXCC']['DXCC_80M']['Contacts'] + awards['ARRL']['DXCC']['DXCC_40M']['Contacts'] + awards['ARRL']['DXCC']['DXCC_30M']['Contacts'] + \
-    awards['ARRL']['DXCC']['DXCC_20M']['Contacts'] + awards['ARRL']['DXCC']['DXCC_17M']['Contacts'] + awards['ARRL']['DXCC']['DXCC_15M']['Contacts'] + awards['ARRL']['DXCC']['DXCC_12M']['Contacts'] + \
-    awards['ARRL']['DXCC']['DXCC_10M']['Contacts'] + awards['ARRL']['DXCC']['DXCC_6M']['Contacts']
-log.info ("        Confirmed (/1000) - %s" % (challenge))
+
+
+#log.info ("      DXCC Challenge - Any mode. 160M-6M. 1000 Entries")
+challenge = awards['ARRL']['DXCC']['160M']['Contacts'] + awards['ARRL']['DXCC']['80M']['Contacts'] + awards['ARRL']['DXCC']['40M']['Contacts'] + awards['ARRL']['DXCC']['30M']['Contacts'] + \
+    awards['ARRL']['DXCC']['20M']['Contacts'] + awards['ARRL']['DXCC']['17M']['Contacts'] + awards['ARRL']['DXCC']['15M']['Contacts'] + awards['ARRL']['DXCC']['12M']['Contacts'] + \
+    awards['ARRL']['DXCC']['10M']['Contacts'] + awards['ARRL']['DXCC']['6M']['Contacts']
+#log.info ("        Confirmed (/1000) - %s" % (challenge))
 awards['ARRL']['DXCC']['DXCC_CHALLENGE'] = {'Contacts': challenge, 'Required': 1000}
 
 
@@ -665,7 +683,7 @@ f.close()
 
 pp.pprint (awards)
 
-pp.pprint (awards['NZART'])
+#pp.pprint (awards['NZART'])
 
 #j = json.dumps(awards, indent = 8)
 #print (j)
