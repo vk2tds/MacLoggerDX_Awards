@@ -18,10 +18,14 @@ import logging.handlers
 import pprint
 import sys
 import re 
+import os
+import urllib.request
 import datetime
 import json
 from dicttoxml import dicttoxml
 from xml.dom.minidom import parseString
+
+
 
 # Change root logger level from WARNING (default) to NOTSET in order for all messages to be delegated.
 logging.getLogger().setLevel(logging.NOTSET)
@@ -33,7 +37,6 @@ formater = logging.Formatter('%(name)-13s: %(levelname)-8s %(message)s')
 console.setFormatter(formater)
 logging.getLogger().addHandler(console)
 logging.getLogger("dicttoxml").setLevel(logging.WARNING)
-
 log = logging.getLogger("app." + __name__)
 
 pp = pprint.PrettyPrinter(indent=4)
@@ -56,78 +59,161 @@ conditions = {"no_maritime": " not call like '%/MM' and ",
 
 #/usr/libexec/PlistBuddy ~/Documents/MLDX_Logs/mode_mapping.plist 
 
-data_mode = ["LSB-D", "LSB-D2", "LSB-D3", "USB-D", "USB-D2", "USB-D3", "FM-D", "FM-D2", "FM-D3", "AM-D", "AM-D2", "AM-D3", "DIGITAL", 
-        "FSK", "FSK-R", "RTTY", "RTTY-R", "RTTY-L", "RTTY-U", "Packet", "PKT-FM", "PKT-U", "PKT-L", "Data", "Data-L", "Data-R", 
-        "Data-U", "Data-FM", "Data-FMN", "PSK", "PSK-R", "FT8", "Spectral", ]
-
-cw_mode = ["CW", "CW-R", "CW Wide", "CW Narrow", "UCW", "LCW"]
-
-phone_mode = ["DV", "P25", "C4FM", "FDV", "DRM", "LSB", "LSB Sync", "USB", "USB Sync", "Double SB", "FM", "FM Wide", "FM Narrow", 
-            "AM", "AM Wide", "AM Narrow", "AM Sync"]
-
-am_mode = ["AM", "AM Wide", "AM Narrow", "AM Sync"]
-
-ssb_mode = ["LSB", "LSB Sync", "USB", "USB Sync"]
-
-rtty_mode = ["RTTY", "RTTY-R", "RTTY-L", "RTTY-U"]
-
-all_mode = data_mode + cw_mode + phone_mode 
-
-oceania = (247,176,489,460,511,190,46,160,157,375,191,234,188,162,512,175,508,509,298,185,507,177,166,20,103,123,174,197,110,138,9,515,297,163,282,301,31,48,490,22,173,168,345,150,153,38,147,171,189,303,35,172,513,327,158,270,170,34,133,16)
 
 
-#ToDO Extend this
-# Unused
-bands = ["160M", "80M", "40M", "30M", "20M", "17M", "15M", "12M", "10M", "6M", "2M", "70CM"]
+def doINIT():
+    global conditions
+    global data_mode
+    global phone_mode
+    global cw_mode
+    global am_mode
+    global ssb_mode
+    global rtty_mode
+    global all_mode
 
-data_statement = " (False "
-for d in data_mode:
-    data_statement = data_statement + " or mode = '" + d + "' "
-data_statement = data_statement + " ) and "
-log.debug (data_statement)
-conditions["DATA"] = data_statement
+    global oceania
+    global bands
 
-cw_statement = " (False "
-for d in cw_mode:
-    cw_statement = cw_statement + " or mode = '" + d + "' "
-cw_statement = cw_statement + " ) and "
-log.debug (cw_statement)
-conditions["CW"] = cw_statement
+    data_mode = ["LSB-D", "LSB-D2", "LSB-D3", "USB-D", "USB-D2", "USB-D3", "FM-D", "FM-D2", "FM-D3", "AM-D", "AM-D2", "AM-D3", "DIGITAL", 
+            "FSK", "FSK-R", "RTTY", "RTTY-R", "RTTY-L", "RTTY-U", "Packet", "PKT-FM", "PKT-U", "PKT-L", "Data", "Data-L", "Data-R", 
+            "Data-U", "Data-FM", "Data-FMN", "PSK", "PSK-R", "FT8", "Spectral", ]
 
-phone_statement = " (False "
-for d in phone_mode:
-    phone_statement = phone_statement + " or mode = '" + d + "' "
-phone_statement = phone_statement + " ) and "
-log.debug (phone_statement)
-conditions["PHONE"] = phone_statement
+    cw_mode = ["CW", "CW-R", "CW Wide", "CW Narrow", "UCW", "LCW"]
 
-am_statement = " (False "
-for d in am_mode:
-    am_statement = am_statement + " or mode = '" + d + "' "
-am_statement = am_statement + " ) and "
-log.debug (am_statement)
-conditions["AM"] = am_statement
+    phone_mode = ["DV", "P25", "C4FM", "FDV", "DRM", "LSB", "LSB Sync", "USB", "USB Sync", "Double SB", "FM", "FM Wide", "FM Narrow", 
+                "AM", "AM Wide", "AM Narrow", "AM Sync"]
 
-ssb_statement = " (False "
-for d in ssb_mode:
-    ssb_statement = ssb_statement + " or mode = '" + d + "' "
-ssb_statement = ssb_statement + " ) and "
-log.debug (ssb_statement)
-conditions["SSB"] = ssb_statement
+    am_mode = ["AM", "AM Wide", "AM Narrow", "AM Sync"]
 
-rtty_statement = " (False "
-for d in rtty_mode:
-    rtty_statement = rtty_statement + " or mode = '" + d + "' "
-rtty_statement = rtty_statement + " ) and "
-log.debug (rtty_statement)
-conditions["RTTY"] = rtty_statement
+    ssb_mode = ["LSB", "LSB Sync", "USB", "USB Sync"]
+
+    rtty_mode = ["RTTY", "RTTY-R", "RTTY-L", "RTTY-U"]
+
+    all_mode = data_mode + cw_mode + phone_mode 
+
+    oceania = (247,176,489,460,511,190,46,160,157,375,191,234,188,162,512,175,508,509,298,185,507,177,166,20,103,123,174,197,110,138,9,515,297,163,282,301,31,48,490,22,173,168,345,150,153,38,147,171,189,303,35,172,513,327,158,270,170,34,133,16)
 
 
-conn = sqlite3.connect ("/Users/darryl/Documents/MLDX_Logs/MacLoggerDX.sql")
+    #ToDO Extend this
+    # Unused
+    bands = ["160M", "80M", "40M", "30M", "20M", "17M", "15M", "12M", "10M", "6M", "2M", "70CM"]
+
+    data_statement = " (False "
+    for d in data_mode:
+        data_statement = data_statement + " or mode = '" + d + "' "
+    data_statement = data_statement + " ) and "
+    #log.debug (data_statement)
+    conditions["DATA"] = data_statement
+
+    cw_statement = " (False "
+    for d in cw_mode:
+        cw_statement = cw_statement + " or mode = '" + d + "' "
+    cw_statement = cw_statement + " ) and "
+    #log.debug (cw_statement)
+    conditions["CW"] = cw_statement
+
+    phone_statement = " (False "
+    for d in phone_mode:
+        phone_statement = phone_statement + " or mode = '" + d + "' "
+    phone_statement = phone_statement + " ) and "
+    #log.debug (phone_statement)
+    conditions["PHONE"] = phone_statement
+
+    am_statement = " (False "
+    for d in am_mode:
+        am_statement = am_statement + " or mode = '" + d + "' "
+    am_statement = am_statement + " ) and "
+    #log.debug (am_statement)
+    conditions["AM"] = am_statement
+
+    ssb_statement = " (False "
+    for d in ssb_mode:
+        ssb_statement = ssb_statement + " or mode = '" + d + "' "
+    ssb_statement = ssb_statement + " ) and "
+    #log.debug (ssb_statement)
+    conditions["SSB"] = ssb_statement
+
+    rtty_statement = " (False "
+    for d in rtty_mode:
+        rtty_statement = rtty_statement + " or mode = '" + d + "' "
+    rtty_statement = rtty_statement + " ) and "
+    #log.debug (rtty_statement)
+    conditions["RTTY"] = rtty_statement
 
 
 
-cur = conn.cursor()
+
+
+def doDatabase():
+    global conn
+    global cur
+
+    #ToDo: Move database name to settings
+    conn = sqlite3.connect ("/Users/darryl/Documents/MLDX_Logs/MacLoggerDX.sql")
+    cur = conn.cursor()
+
+
+
+
+def doGetDXCC_Continent():
+    # https://gitlab.com/andreas_krueger_py/call_to_dxcc/-/blob/master/call_to_dxcc/__init__.py
+
+    #  This Function: ->
+    #
+    #  Copyright 2019 Andreas Krüger, DJ3EI
+    #
+    #  Licensed under the Apache License, Version 2.0 (the "License");
+    #  you may not use this file except in compliance with the License.
+    #  You may obtain a copy of the License at
+    #
+    #      http://www.apache.org/licenses/LICENSE-2.0
+    #
+    #  Unless required by applicable law or agreed to in writing, software
+    #  distributed under the License is distributed on an "AS IS" BASIS,
+    #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    #  See the License for the specific language governing permissions and
+    #  limitations under the License.
+
+    dxcc_file = "dxcc.txt"
+    if not os.path.exists(dxcc_file):
+        dxcc_uri = "http://www.arrl.org/files/file/DXCC/2019_Current_Deleted(3).txt"
+        dxcc_file, headers = urllib.request.urlretrieve(dxcc_uri, filename="dxcc.txt")
+
+    continents = {}
+    with open(dxcc_file, mode="r", encoding="UTF-8") as dxcc_in:
+        dxcc_txt = dxcc_in.read()
+        parse_state = "SEARCHING_FOR_LIST"
+        table_top = re.compile("[_ ]+")
+        empty_line = re.compile(" *")
+        data_line = re.compile(r"\s+([0-9A-Z,_\-\/]+)" \
+                            r"(?:\#?\*?\(\d+\),?)*\#?\^?\*?\s+" \
+                            r"(.*?)\s+" \
+                            r"([A-Z]{2}(?:,[A-Z]{2})?)\s+" \
+                            r"(\d{2}(?:[,\-]\d{2})?|\([A-Z]\))\s+" \
+                            r"(\d{2}(?:[,\-]\d{2})?|\([A-Z]\))\s+0*(\d+?)(?:\s*?)")
+        for line in dxcc_txt.splitlines():
+            if parse_state == "SEARCHING_FOR_LIST":
+                if table_top.fullmatch(line):
+                    parse_state = "TABLE"
+            elif empty_line.fullmatch(line):
+                break
+            else:
+                split = data_line.fullmatch(line)
+                if not split:
+                    if "Spratly Is." in line:
+                        pass # This is messy. Don't care about it.
+                    else:
+                        raise RuntimeError("Ooops. Code is broken, cannot handle: \"{}\".".format(line))
+                else:
+                    call_prefixes, name, continent, dxcc_number = split.group(1), split.group(2), split.group(3), int(split.group(6))
+                    # print((call_prefixes, name, continent, dxcc_number))
+                    continents[dxcc_number] = continent
+    return continents
+
+
+
+
+
 
 
 
@@ -310,7 +396,7 @@ def doDXCC_MISSINGQSL():
     res = cur.execute (expr)
     output = res.fetchall()
     awards['ARRL']['DXCC']['DXCC_MISSINGQSL'] = {'DXCC': output, 'Count': len(output)}
-    log.info ("        %s" %(awards['ARRL']['DXCC']['DXCC_MISSINGQSL']))
+    #log.info ("        %s" %(awards['ARRL']['DXCC']['DXCC_MISSINGQSL']))
 
 
 def doCQWPX_MODE(mode_desc, count, modes, details):
@@ -347,10 +433,50 @@ def doCQWPX_BAND(target_band, count, details):
     log.info ("        Confirmed (/%s) - %s" %(count, len(combined)))
 
 
+def doCQWPX_CONTINENT(continent, count):
+    # https://cq-amateur-radio.com/cq_awards/cq_wpx_awards/cq-wpx-award-rules-022017.pdf
+    global awards
+    global cur
+
+    co = "("
+    for code in continents:
+        if continents[code] == continent: 
+            co += " dxcc_id = " + str(code) + " or "
+    co += "false) "
+
+    expr = "select DISTINCT call, dxcc_id from qso_table_v007 where " + conditions['LoTW'] + co
+    res = cur.execute (expr)
+
+    prefixes = []
+    calls = res.fetchall()
+    # https://regex101.com
+    for c, d in calls: # Call, Band, Mode
+        c = c.upper()
+        if c[-2:] == "/P": # Remove /P from end of call since it doesnt mean anything, under the rules
+            c = c[:-2]
+        if c.find("/") >= 0:
+            c = c[0:c.index("/")]
+            if not c[-1].isnumeric(): # If prefix with a / doesnt have a number at the end, add a 0
+                c += "0"
+        r = re.search ("^[A-Z]+[0-9]+", c)
+        #print (c, r)
+        if r is not None:
+            if not r.group() in prefixes:
+                prefixes.append(r.group())
+        else:
+            r = re.search("^[0-9][A-Z]+[0-9]+", c)
+            if not r.group() in prefixes:
+                prefixes.append(r.group())
+            #print (r.group())
+
+
+    awards['CQ']['CQWPX']['CONTINENTS'][continent] = {'Prefixes': len(prefixes), 'Required': count}
+
 
 def doCQWPX():
     # https://cq-amateur-radio.com/cq_awards/cq_wpx_awards/cq-wpx-award-rules-022017.pdf
     global awards
+    global cur
 
     details = dict()
     details['160M'] = dict()
@@ -367,9 +493,6 @@ def doCQWPX():
     details['70CM'] = dict()
     details['23CM'] = dict()
     details['3CM'] = dict()
-
-
-
 
 
 
@@ -414,7 +537,7 @@ def doCQWPX():
 
 def doNZART_NZAWARD():
     global awards
-    log.info ("NZART: NZ AWARD")
+    #log.info ("NZART: NZ AWARD")
 
     expr = 'select distinct call ' + conditions['from'] + "call like 'ZL%' order by call"
     res = cur.execute (expr)
@@ -448,6 +571,7 @@ def doNZART_NZAWARD():
     all['ZL3'] = {'Contatcs': len (zl['ZL3']), 'Required': 20}
     all['ZL4'] = {'Contatcs': len (zl['ZL4']), 'Required': 10}
     all['ZL789'] = {'Contatcs': len (zl['ZL789']), 'Required': 1, 'Notes': 'Special Conditions'}
+    all['Notes'] = 'Require ZL1,2,3&4 and one contact with an external teritory etc'
 
     awards['NZART']['NZAWARD'] = all
 
@@ -470,7 +594,7 @@ def doNZART_NZCENTURYAWARD():
     #print (grid)
 
     awards['NZART']['NZCENTURYAWARD'] = {'Contacts': len(grids), "Required": 100}
-    log.info ("    Details %s" % (awards['NZART']['NZCENTURYAWARD']))
+    #log.info ("    Details %s" % (awards['NZART']['NZCENTURYAWARD']))
 
 
 def doNZART_TIKI():
@@ -489,7 +613,7 @@ def doNZART_TIKI():
             c += 1
 
     awards['NZART']['TIKI'] = {'Bands': r, 'BandsQualified': c, 'Required': 5}
-    log.info ("    Details %s" % (awards['NZART']['TIKI']))
+    #log.info ("    Details %s" % (awards['NZART']['TIKI']))
 
 
 
@@ -498,8 +622,13 @@ def doNZART_WORKEDALLPACIFIC():
     log.info ("NZART: WORKEDALLPACIFIC")
 
     co = "("
-    for code in oceania:
-        co += " dxcc_id = " + str(code) + " or "
+    #for code in oceania:
+    #    co += " dxcc_id = " + str(code) + " or "
+    #co += "false) "
+
+    for code in continents:
+        if continents[code] == 'OC': 
+            co += " dxcc_id = " + str(code) + " or "
     co += "false) "
 
 
@@ -521,170 +650,234 @@ def doNZART_WORKEDALLPACIFIC():
 
 
 
+def doINIT_Awards():
+    global awards    
+
+    awards = {}
+    awards['CQ'] = {}
+    awards['CQ']['CQWAZ'] = {}
+    awards['CQ']['CQWPX'] = {}
+    awards['STATS'] = {}
+    awards['ARRL'] = {}
+    awards['ARRL']['DXCC'] = {}
+    awards['NZART'] = {}
+    awards['NZART']['NZAWARD'] = {}
+    awards['NZART']['NZCENTURYAWARD'] = {}
+    awards['NZART']['TIKI'] = {}
+    awards['NZART']['WORKEDALLPACIFIC'] = {}
+    awards['ARRL']['DXCC']['Notes'] = "LoTW or Paper QSL Cards only; No Maritime Mobile; No Repeaters - Assuming None; No Satellite - Assuming none"
 
 
-awards = {}
-awards['CQ'] = {}
-awards['CQ']['CQWAZ'] = {}
-awards['CQ']['CQWPX'] = {}
-awards['STATS'] = {}
-awards['ARRL'] = {}
-awards['ARRL']['DXCC'] = {}
-awards['NZART'] = {}
-awards['NZART']['NZAWARD'] = {}
-awards['NZART']['NZCENTURYAWARD'] = {}
-awards['NZART']['TIKI'] = {}
-awards['NZART']['WORKEDALLPACIFIC'] = {}
+def doAWARDS_DXCC():
+    global awards
 
-awards['ARRL']['DXCC']['Notes'] = "LoTW or Paper QSL Cards only; No Maritime Mobile; No Repeaters - Assuming None; No Satellite - Assuming none"
+    doDXCC_MIXED ()
+    doDXCC_MODE ("PHONE")
+    doDXCC_MODE ("CW")
+    doDXCC_MODE ("DATA")
+    doDXCC_BAND ("160M")
+    doDXCC_BAND ("80M")
+    doDXCC_BAND ("40M")
+    doDXCC_BAND ("30M")
+    doDXCC_BAND ("20M")
+    doDXCC_BAND ("17M")
+    doDXCC_BAND ("15M")
+    doDXCC_BAND ("12M")
+    doDXCC_BAND ("10M")
+    doDXCC_BAND ("6M")
+    doDXCC_BAND ("2M")
+    doDXCC_BAND ("70CM")
+    awards['ARRL']['DXCC']['70CM']['Notes'] = 'Satellites Now Permitted - Still not checked'
+    doDXCC_BAND ("23CM")
+    awards['ARRL']['DXCC']['23CM']['Notes'] = 'Satellites Now Permitted - Still not checked'
+    doDXCC_BAND ("12CM")
+    awards['ARRL']['DXCC']['12CM']['Notes'] = 'Satellites Now Permitted - Still not checked'
+    doDXCC_BAND ("3CM")
+    awards['ARRL']['DXCC']['3CM']['Notes'] = 'Satellites Now Permitted - Still not checked'
 
-doDXCC_MIXED ()
-doDXCC_MODE ("PHONE")
-doDXCC_MODE ("CW")
-doDXCC_MODE ("DATA")
-doDXCC_BAND ("160M")
-doDXCC_BAND ("80M")
-doDXCC_BAND ("40M")
-doDXCC_BAND ("30M")
-doDXCC_BAND ("20M")
-doDXCC_BAND ("17M")
-doDXCC_BAND ("15M")
-doDXCC_BAND ("12M")
-doDXCC_BAND ("10M")
-doDXCC_BAND ("6M")
-doDXCC_BAND ("2M")
-doDXCC_BAND ("70CM")
-awards['ARRL']['DXCC']['70CM']['Notes'] = 'Satellites Now Permitted - Still not checked'
-doDXCC_BAND ("23CM")
-awards['ARRL']['DXCC']['23CM']['Notes'] = 'Satellites Now Permitted - Still not checked'
-doDXCC_BAND ("12CM")
-awards['ARRL']['DXCC']['12CM']['Notes'] = 'Satellites Now Permitted - Still not checked'
-doDXCC_BAND ("3CM")
-awards['ARRL']['DXCC']['3CM']['Notes'] = 'Satellites Now Permitted - Still not checked'
+    doDXCC_MISSINGQSL ()
 
-doDXCC_MISSINGQSL ()
+    awards['ARRL']['DXCC']['Satellite'] = {'Notes': 'ToDo: No Satellite Log Analysis has been done'}
 
+    #log.info ("      5BDXCC - Any Mode, 100 each on 80M, 40M, 20M, 15M, 10M; then endorceable for 160M, 30M, 17M, 12M, 6M, 2M")
+    #log.info ("        Confirmed (/100)= (%s, %s, %s, %s, %s) then (%s, %s, %s, %s, %s, %s)" % (  )
 
-log.info ("      Satellite - Any Mode, Any Band")
+    awards['ARRL']['DXCC']['5BDXCC'] = { 'Notes': 'Any Mode, 100 each on 80M, 40M, 20M, 15M, 10M; then endorceable for 160M, 30M, 17M, 12M, 6M, 2M'}
 
-#log.info ("      5BDXCC - Any Mode, 100 each on 80M, 40M, 20M, 15M, 10M; then endorceable for 160M, 30M, 17M, 12M, 6M, 2M")
-#log.info ("        Confirmed (/100)= (%s, %s, %s, %s, %s) then (%s, %s, %s, %s, %s, %s)" % (  )
+    awards['ARRL']['DXCC']['5BDXCC']['Primary'] = {}
+    awards['ARRL']['DXCC']['5BDXCC']['Primary']['80M'] = {'Contacts': awards['ARRL']['DXCC']['80M']['Contacts'], 'Count':100}
+    awards['ARRL']['DXCC']['5BDXCC']['Primary']['40M'] = {'Contacts': awards['ARRL']['DXCC']['40M']['Contacts'], 'Count':100}
+    awards['ARRL']['DXCC']['5BDXCC']['Primary']['20M'] = {'Contacts': awards['ARRL']['DXCC']['20M']['Contacts'], 'Count':100}
+    awards['ARRL']['DXCC']['5BDXCC']['Primary']['15M'] = {'Contacts': awards['ARRL']['DXCC']['15M']['Contacts'], 'Count':100}
+    awards['ARRL']['DXCC']['5BDXCC']['Primary']['10M'] = {'Contacts': awards['ARRL']['DXCC']['10M']['Contacts'], 'Count':100}
 
-awards['ARRL']['DXCC']['5BDXCC'] = { 'Notes': 'Any Mode, 100 each on 80M, 40M, 20M, 15M, 10M; then endorceable for 160M, 30M, 17M, 12M, 6M, 2M'}
-
-awards['ARRL']['DXCC']['5BDXCC']['Primary'] = {}
-awards['ARRL']['DXCC']['5BDXCC']['Primary']['80M'] = {'Contacts': awards['ARRL']['DXCC']['80M']['Contacts'], 'Count':100}
-awards['ARRL']['DXCC']['5BDXCC']['Primary']['40M'] = {'Contacts': awards['ARRL']['DXCC']['40M']['Contacts'], 'Count':100}
-awards['ARRL']['DXCC']['5BDXCC']['Primary']['20M'] = {'Contacts': awards['ARRL']['DXCC']['20M']['Contacts'], 'Count':100}
-awards['ARRL']['DXCC']['5BDXCC']['Primary']['15M'] = {'Contacts': awards['ARRL']['DXCC']['15M']['Contacts'], 'Count':100}
-awards['ARRL']['DXCC']['5BDXCC']['Primary']['10M'] = {'Contacts': awards['ARRL']['DXCC']['10M']['Contacts'], 'Count':100}
-
-awards['ARRL']['DXCC']['5BDXCC']['Endorcements'] = {}
-awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['160M'] = {'Contacts': awards['ARRL']['DXCC']['160M']['Contacts'], 'Count':100}
-awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['30M'] = {'Contacts': awards['ARRL']['DXCC']['30M']['Contacts'], 'Count':100}
-awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['17M'] = {'Contacts': awards['ARRL']['DXCC']['17M']['Contacts'], 'Count':100}
-awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['12M'] = {'Contacts': awards['ARRL']['DXCC']['12M']['Contacts'], 'Count':100}
-awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['6M'] = {'Contacts': awards['ARRL']['DXCC']['6M']['Contacts'], 'Count':100}
-awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['2M'] = {'Contacts': awards['ARRL']['DXCC']['2M']['Contacts'], 'Count':100}
+    awards['ARRL']['DXCC']['5BDXCC']['Endorcements'] = {}
+    awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['160M'] = {'Contacts': awards['ARRL']['DXCC']['160M']['Contacts'], 'Count':100}
+    awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['30M'] = {'Contacts': awards['ARRL']['DXCC']['30M']['Contacts'], 'Count':100}
+    awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['17M'] = {'Contacts': awards['ARRL']['DXCC']['17M']['Contacts'], 'Count':100}
+    awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['12M'] = {'Contacts': awards['ARRL']['DXCC']['12M']['Contacts'], 'Count':100}
+    awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['6M'] = {'Contacts': awards['ARRL']['DXCC']['6M']['Contacts'], 'Count':100}
+    awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['2M'] = {'Contacts': awards['ARRL']['DXCC']['2M']['Contacts'], 'Count':100}
 
 
-
-
-#log.info ("      DXCC Challenge - Any mode. 160M-6M. 1000 Entries")
-challenge = awards['ARRL']['DXCC']['160M']['Contacts'] + awards['ARRL']['DXCC']['80M']['Contacts'] + awards['ARRL']['DXCC']['40M']['Contacts'] + awards['ARRL']['DXCC']['30M']['Contacts'] + \
-    awards['ARRL']['DXCC']['20M']['Contacts'] + awards['ARRL']['DXCC']['17M']['Contacts'] + awards['ARRL']['DXCC']['15M']['Contacts'] + awards['ARRL']['DXCC']['12M']['Contacts'] + \
-    awards['ARRL']['DXCC']['10M']['Contacts'] + awards['ARRL']['DXCC']['6M']['Contacts']
-#log.info ("        Confirmed (/1000) - %s" % (challenge))
-awards['ARRL']['DXCC']['DXCC_CHALLENGE'] = {'Contacts': challenge, 'Required': 1000}
-
-
-log.info ("CQ WAZ: General Conditions")
-log.info ("      https://cq-amateur-radio.com/cq_awards/cq_waz_awards/june2022-Final-with-color-break-for-Jose-to-review-Rev-B.pdf")
-log.info ("      LoTW, eQSL or Paper QSL Cards only")
-log.info ("      No Satellite ")
-log.info ("      ***Assuming all eQSL is Authenticity Guarenteed***")
-log.info ("      ***Assuming no satellite***")
-log.info ("      ***Assuming dates OK***")
-
-
-doCQWAZ_MIXED ()
-
-
-log.info ("      SSTV - Any Mode, Any Band")
-log.info ("      Satellite - Any Mode, Any Band")
-log.info ("      EME - Any Mode, Any Band")
-
-doCQWAZ_MODE ("DATA")
-doCQWAZ_MODE ("RTTY")
-doCQWAZ_MODE ("CW")
-doCQWAZ_MODE ("SSB")
-doCQWAZ_MODE ("AM")
-doCQWAZ ("160M")
-doCQWAZ_BAND ("80M")
-doCQWAZ_BAND ("40M")
-doCQWAZ_BAND ("30M")
-doCQWAZ_BAND ("20M")
-doCQWAZ_BAND ("17M")
-doCQWAZ_BAND ("15M")
-doCQWAZ_BAND ("12M")
-doCQWAZ_BAND ("10M")
-doCQWAZ ("6M")
+    #log.info ("      DXCC Challenge - Any mode. 160M-6M. 1000 Entries")
+    challenge = awards['ARRL']['DXCC']['160M']['Contacts'] + awards['ARRL']['DXCC']['80M']['Contacts'] + awards['ARRL']['DXCC']['40M']['Contacts'] + awards['ARRL']['DXCC']['30M']['Contacts'] + \
+        awards['ARRL']['DXCC']['20M']['Contacts'] + awards['ARRL']['DXCC']['17M']['Contacts'] + awards['ARRL']['DXCC']['15M']['Contacts'] + awards['ARRL']['DXCC']['12M']['Contacts'] + \
+        awards['ARRL']['DXCC']['10M']['Contacts'] + awards['ARRL']['DXCC']['6M']['Contacts']
+    #log.info ("        Confirmed (/1000) - %s" % (challenge))
+    awards['ARRL']['DXCC']['DXCC_CHALLENGE'] = {'Contacts': challenge, 'Required': 1000}
 
 
 
-log.info ("CQ WPX: General Conditions")
-cqwpxDetails = doCQWPX()
-doCQWPX_MODE ("Mixed", 400, all_mode, cqwpxDetails )
-doCQWPX_MODE ("CW", 300, cw_mode, cqwpxDetails )
-doCQWPX_MODE ("SSB", 300, ssb_mode, cqwpxDetails )
-doCQWPX_MODE ("Digital", 300, data_mode, cqwpxDetails )
+def doAWARDS_CQWAZ():
+    global awards
 
-doCQWPX_BAND ("160M", 50, cqwpxDetails)
-doCQWPX_BAND ("80M", 175, cqwpxDetails)
-doCQWPX_BAND ("160M", 175, cqwpxDetails)
-doCQWPX_BAND ("40M", 250, cqwpxDetails)
-doCQWPX_BAND ("30M", 250, cqwpxDetails)
-doCQWPX_BAND ("20M", 300, cqwpxDetails)
-doCQWPX_BAND ("17M", 300, cqwpxDetails)
-doCQWPX_BAND ("15M", 300, cqwpxDetails)
-doCQWPX_BAND ("12M", 300, cqwpxDetails)
-doCQWPX_BAND ("10M", 300, cqwpxDetails)
-doCQWPX_BAND ("6M", 250, cqwpxDetails)
+    awards['CQ']['CQWAZ'] = {'Notes': 'LoTW, eQSL or Paper QSL Cards only; No Satellite; Assuming eQSL is Authenticity Guarenteed; Assuming no satellites. Assuming dates OK ', 
+                             'URL': 'https://cq-amateur-radio.com/cq_awards/cq_waz_awards/june2022-Final-with-color-break-for-Jose-to-review-Rev-B.pdf'}
 
-log.info ("      North America" )
-log.info ("      South America" )
-log.info ("      Europe America" )
-log.info ("      Africa America" )
-log.info ("      Asia America" )
-log.info ("      Oceania America" )
+
+    #log.info ("CQ WAZ: General Conditions")
+    #log.info ("      https://cq-amateur-radio.com/cq_awards/cq_waz_awards/june2022-Final-with-color-break-for-Jose-to-review-Rev-B.pdf")
+    #log.info ("      LoTW, eQSL or Paper QSL Cards only")
+    #log.info ("      No Satellite ")
+    #log.info ("      ***Assuming all eQSL is Authenticity Guarenteed***")
+    #log.info ("      ***Assuming no satellite***")
+    #log.info ("      ***Assuming dates OK***")
+
+
+    doCQWAZ_MIXED ()
+
+    awards['CQ']['CQWAZ']['Satellite'] = {'Notes': 'No Analysis has been done'}
+    awards['CQ']['CQWAZ']['SSTV'] = {'Notes': 'No Analysis has been done'}
+    awards['CQ']['CQWAZ']['EME'] = {'Notes': 'No Analysis has been done'}
 
 
 
-log.info ("NZART Awards")
-doNZART_NZAWARD()
-doNZART_NZCENTURYAWARD()
-doNZART_TIKI()
-doNZART_WORKEDALLPACIFIC()
+    doCQWAZ_MODE ("DATA")
+    doCQWAZ_MODE ("RTTY")
+    doCQWAZ_MODE ("CW")
+    doCQWAZ_MODE ("SSB")
+    doCQWAZ_MODE ("AM")
+    doCQWAZ_BAND ("160M") #doCQWAZ ("160M")
+    doCQWAZ_BAND ("80M")
+    doCQWAZ_BAND ("40M")
+    doCQWAZ_BAND ("30M")
+    doCQWAZ_BAND ("20M")
+    doCQWAZ_BAND ("17M")
+    doCQWAZ_BAND ("15M")
+    doCQWAZ_BAND ("12M")
+    doCQWAZ_BAND ("10M")
+    doCQWAZ_BAND ("6M") #doCQWAZ ("6M")
 
 
 
-# Not contests but interesting information to show
-doSTATS_QSL()
-doSTATS_BANDS()
-doSTATS_MODES()
-doSTATS_DXCCBYDATE()
-
-# Does not view well in Safari
-xml = dicttoxml(awards)
-f=open ("demofile2.xml", "w")
-f.write (parseString(xml).toprettyxml())
-f.close()
+def doAWARDS_CQWPX():
+    global awards
 
 
-pp.pprint (awards)
+    awards['CQ']['CQWPX']['CONTINENTS'] = {}
+    awards['CQ']['CQWPX']['CONTINENTS']['NA'] = {}
+    awards['CQ']['CQWPX']['CONTINENTS']['SA'] = {}
+    awards['CQ']['CQWPX']['CONTINENTS']['EU'] = {}     
+    awards['CQ']['CQWPX']['CONTINENTS']['AS'] = {}
+    awards['CQ']['CQWPX']['CONTINENTS']['AF'] = {}
+    awards['CQ']['CQWPX']['CONTINENTS']['OC'] = {}
 
-#pp.pprint (awards['NZART'])
 
-#j = json.dumps(awards, indent = 8)
-#print (j)
+    log.info ("CQ WPX: General Conditions")
+    cqwpxDetails = doCQWPX()
+    doCQWPX_MODE ("Mixed", 400, all_mode, cqwpxDetails )
+    doCQWPX_MODE ("CW", 300, cw_mode, cqwpxDetails )
+    doCQWPX_MODE ("SSB", 300, ssb_mode, cqwpxDetails )
+    doCQWPX_MODE ("Digital", 300, data_mode, cqwpxDetails )
+
+    doCQWPX_BAND ("160M", 50, cqwpxDetails)
+    doCQWPX_BAND ("80M", 175, cqwpxDetails)
+    doCQWPX_BAND ("160M", 175, cqwpxDetails)
+    doCQWPX_BAND ("40M", 250, cqwpxDetails)
+    doCQWPX_BAND ("30M", 250, cqwpxDetails)
+    doCQWPX_BAND ("20M", 300, cqwpxDetails)
+    doCQWPX_BAND ("17M", 300, cqwpxDetails)
+    doCQWPX_BAND ("15M", 300, cqwpxDetails)
+    doCQWPX_BAND ("12M", 300, cqwpxDetails)
+    doCQWPX_BAND ("10M", 300, cqwpxDetails)
+    doCQWPX_BAND ("6M", 250, cqwpxDetails)
+
+
+
+
+
+    doCQWPX_CONTINENT ("NA", 160)
+    doCQWPX_CONTINENT ("SA", 95)
+    doCQWPX_CONTINENT ("EU", 160)
+    doCQWPX_CONTINENT ("AF", 90)
+    doCQWPX_CONTINENT ("AS", 75)
+    doCQWPX_CONTINENT ("OC", 60)
+
+
+
+def doAWARDS_NZART():
+    global awards
+
+    log.info ("NZART Awards")
+    doNZART_NZAWARD()
+    doNZART_NZCENTURYAWARD()
+    doNZART_TIKI()
+    doNZART_WORKEDALLPACIFIC()
+
+def doSTATS():
+    global awards
+
+    # Not contests but interesting information to show
+    doSTATS_QSL()
+    doSTATS_BANDS()
+    doSTATS_MODES()
+    doSTATS_DXCCBYDATE()
+
+
+
+
+
+if True:
+    doINIT()
+    doDatabase()
+    doINIT_Awards()
+    continents = doGetDXCC_Continent() 
+
+    doAWARDS_DXCC()
+    doAWARDS_CQWAZ()
+    doAWARDS_CQWPX()
+
+    doAWARDS_NZART()
+    doSTATS()
+
+
+    # Does not view well in Safari
+    xml = dicttoxml(awards)
+    f=open ("demofile2.xml", "w")
+    f.write (parseString(xml).toprettyxml())
+    f.close()
+
+
+    pp.pprint (awards)
+
+    #pp.pprint (awards['NZART'])
+
+    #j = json.dumps(awards, indent = 8)
+    #print (j)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
