@@ -345,38 +345,38 @@ def doCQWAZ_BAND(band):
 def doCQWAZ(band):
     global awards
 
-    log.info ("      %s - Any Mode, Any Band" % (band))
+    #log.info ("      %s - Any Mode, Any Band" % (band))
     expr = conditions['startCQWAZ'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTWeQSL'] + " band_rx = '" + band + "' and " + conditions['end']
     res = cur.execute (expr)
     awards['CQ']['CQWAZ']['CQWAZ_' + band] = {'Contacts':res.fetchone()[0], 'Required':40}
-    log.info ("        Confirmed (/40) - %s" %(awards['CQ']['CQWAZ']['CQWAZ_' + band]['Contacts']))
+    #log.info ("        Confirmed (/40) - %s" %(awards['CQ']['CQWAZ']['CQWAZ_' + band]['Contacts']))
 
 def doCQWAZ_MODE (mode):
     global awards
 
-    log.info ("      %s - Any Mode, Any Band" % (mode))
+    #log.info ("      %s - Any Mode, Any Band" % (mode))
     expr = conditions['startCQWAZ'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTWeQSL'] + conditions[mode] + conditions['end']
     res = cur.execute (expr)
     awards['CQ']['CQWAZ']['CQWAZ_' + mode] = {'Contacts':res.fetchone()[0], 'Required':40}
-    log.info ("        Confirmed (/40) - %s" %(awards['CQ']['CQWAZ']['CQWAZ_' + mode]['Contacts']))
+    #log.info ("        Confirmed (/40) - %s" %(awards['CQ']['CQWAZ']['CQWAZ_' + mode]['Contacts']))
 
 def doDXCC_MIXED():
     global awards
-    log.info ("      Mixed - Any Mode, Any Band")
+    #log.info ("      Mixed - Any Mode, Any Band")
     expr = conditions['startDXCC'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTW'] + conditions['end']
     res = cur.execute (expr)
     awards['ARRL']['DXCC']['DXCC_MIXED'] = {'Contacts':res.fetchone()[0], 'Required':100}
-    log.info ("        Confirmed (/100) - %s" %(awards['ARRL']['DXCC']['DXCC_MIXED']['Contacts']))
+    #log.info ("        Confirmed (/100) - %s" %(awards['ARRL']['DXCC']['DXCC_MIXED']['Contacts']))
 
 
 def doDXCC_MODE(mode):
     global awards
 
-    log.info ("      %s - Not Digital, Any Band" % (mode))
+    #log.info ("      %s - Not Digital, Any Band" % (mode))
     expr = conditions['startDXCC'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTW'] + conditions[mode] + conditions['end']
     res = cur.execute (expr)
     awards['ARRL']['DXCC']['DXCC_' + mode] = {'Contacts':res.fetchone()[0], 'Required':100}
-    log.info ("        Confirmed (/100) - %s" %(awards['ARRL']['DXCC']['DXCC_' + mode]['Contacts']))
+    #log.info ("        Confirmed (/100) - %s" %(awards['ARRL']['DXCC']['DXCC_' + mode]['Contacts']))
 
 def doDXCC_BAND(band):
     global awards
@@ -389,7 +389,6 @@ def doDXCC_BAND(band):
 
 def doDXCC_MISSINGQSL():
     global awards
-
 
     expr = "SELECT distinct dxcc_country FROM qso_table_v007 where " + conditions['no_maritime'] + " True " + "EXCEPT "
     expr = expr + "SELECT distinct dxcc_country FROM qso_table_v007 where " + conditions['no_maritime'] + conditions['LoTW'] + " True"
@@ -412,10 +411,8 @@ def doCQWPX_MODE(mode_desc, count, modes, details):
                 combined = list(set(combined) | set(prefixes))
                 #count = count + len(prefixes)
     awards['CQ']['CQWPX']['CQWPX_'+mode_desc] = {'Contacts':len(combined), 'Required':count}
-    log.info ("      %s - Any Band" % (mode_desc))
-    log.info ("        Confirmed (/%s) - %s" %(count, len(combined)))
 
-def doCQWPX_BAND(target_band, count, details):
+def doCQWPX_BAND(target_band, full_mode, count, details):
     global awards
 
     combined = []
@@ -423,17 +420,19 @@ def doCQWPX_BAND(target_band, count, details):
         if band == target_band:
             log.debug (band)
             for mode, prefixes in y.items():
-                log.debug (mode)
+                #log.debug (mode)
                 #print (prefixes)
                 combined = list(set(combined) | set(prefixes))
                 #count = count + len(prefixes)
-    awards['CQ']['CQWPX']['CQWPX_'+target_band] = {'Contacts':len(combined), 'Required':count}
+    if not 'CQWPX_'+target_band in awards['CQ']['CQWPX']:
+        awards['CQ']['CQWPX']['CQWPX_'+target_band] = {}
+    awards['CQ']['CQWPX']['CQWPX_'+target_band][full_mode] = {'Contacts':len(combined), 'Required':count}
 
-    log.info ("      %s - Any Mode" % (target_band))
-    log.info ("        Confirmed (/%s) - %s" %(count, len(combined)))
+    #log.info ("      %s - Any Mode" % (target_band))
+    #log.info ("        Confirmed (/%s) - %s" %(count, len(combined)))
 
 
-def doCQWPX_CONTINENT(continent, count):
+def doCQWPX_CONTINENT(continent, mode,count):
     # https://cq-amateur-radio.com/cq_awards/cq_wpx_awards/cq-wpx-award-rules-022017.pdf
     global awards
     global cur
@@ -443,6 +442,9 @@ def doCQWPX_CONTINENT(continent, count):
         if continents[code] == continent: 
             co += " dxcc_id = " + str(code) + " or "
     co += "false) "
+
+    if mode == "DIGITAL":
+        co += ' and ' + conditions["DATA"] + ' True '
 
     expr = "select DISTINCT call, dxcc_id from qso_table_v007 where " + conditions['LoTW'] + co
     res = cur.execute (expr)
@@ -470,35 +472,24 @@ def doCQWPX_CONTINENT(continent, count):
             #print (r.group())
 
 
-    awards['CQ']['CQWPX']['CONTINENTS'][continent] = {'Prefixes': len(prefixes), 'Required': count}
+    awards['CQ']['CQWPX']['CONTINENTS'][continent][mode] = {'Prefixes': len(prefixes), 'Required': count}
 
 
-def doCQWPX():
+def doCQWPX(mode):
     # https://cq-amateur-radio.com/cq_awards/cq_wpx_awards/cq-wpx-award-rules-022017.pdf
     global awards
-    global cur
+    #global cur
 
-    details = dict()
-    details['160M'] = dict()
-    details['80M'] = dict()
-    details['40M'] = dict()
-    details['30M'] = dict()
-    details['20M'] = dict()
-    details['17M'] = dict()
-    details['15M'] = dict()
-    details['12M'] = dict()
-    details['10M'] = dict()
-    details['6M'] = dict()
-    details['2M'] = dict()
-    details['70CM'] = dict()
-    details['23CM'] = dict()
-    details['3CM'] = dict()
+    details = {'160M': {}, '80M': {}, '40M': {}, '30M': {}, '20M': {}, '17M': {}, '15M': {}, '12M': {}, 
+               '10M': {}, '6M': {}, '2M': {}, '70CM': {}, '23CM': {}, '3C': {}}
 
 
 
     log.info ("      WPX - Any Mode" )
     #expr = conditions['startDXCC'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTW'] +  " band_rx = '" + band + "' and " + conditions['end']
-    expr = "select DISTINCT call, band_rx, mode from qso_table_v007 where " + conditions['LoTW'] + "True"
+    expr = "select DISTINCT call, band_rx, mode from qso_table_v007 where " + conditions['LoTW'] + " True "
+    if mode == 'DIGITAL':
+        expr += ' and ' + conditions['DATA'] + ' True'
     #print (expr)
     res = cur.execute (expr)
     
@@ -699,9 +690,6 @@ def doAWARDS_DXCC():
 
     awards['ARRL']['DXCC']['Satellite'] = {'Notes': 'ToDo: No Satellite Log Analysis has been done'}
 
-    #log.info ("      5BDXCC - Any Mode, 100 each on 80M, 40M, 20M, 15M, 10M; then endorceable for 160M, 30M, 17M, 12M, 6M, 2M")
-    #log.info ("        Confirmed (/100)= (%s, %s, %s, %s, %s) then (%s, %s, %s, %s, %s, %s)" % (  )
-
     awards['ARRL']['DXCC']['5BDXCC'] = { 'Notes': 'Any Mode, 100 each on 80M, 40M, 20M, 15M, 10M; then endorceable for 160M, 30M, 17M, 12M, 6M, 2M'}
 
     awards['ARRL']['DXCC']['5BDXCC']['Primary'] = {}
@@ -758,6 +746,7 @@ def doAWARDS_CQWAZ():
     doCQWAZ_MODE ("CW")
     doCQWAZ_MODE ("SSB")
     doCQWAZ_MODE ("AM")
+
     doCQWAZ_BAND ("160M") #doCQWAZ ("160M")
     doCQWAZ_BAND ("80M")
     doCQWAZ_BAND ("40M")
@@ -776,43 +765,73 @@ def doAWARDS_CQWPX():
 
 
     awards['CQ']['CQWPX']['CONTINENTS'] = {}
-    awards['CQ']['CQWPX']['CONTINENTS']['NA'] = {}
-    awards['CQ']['CQWPX']['CONTINENTS']['SA'] = {}
-    awards['CQ']['CQWPX']['CONTINENTS']['EU'] = {}     
-    awards['CQ']['CQWPX']['CONTINENTS']['AS'] = {}
-    awards['CQ']['CQWPX']['CONTINENTS']['AF'] = {}
-    awards['CQ']['CQWPX']['CONTINENTS']['OC'] = {}
+    awards['CQ']['CQWPX']['CONTINENTS']['MIXED'] = {}
+    awards['CQ']['CQWPX']['CONTINENTS']['DIGITAL'] = {}
+    awards['CQ']['CQWPX']['CONTINENTS'] = {'NA': {}, 'SA': {}, 'EU': {}, 'AS': {}, 'AF': {}, 'OC': {}}
+
+    awards['CQ']['CQWPX']['CONTINENTS']['NA']['MIXED'] = {}
+    awards['CQ']['CQWPX']['CONTINENTS']['SA']['MIXED'] = {}
+    awards['CQ']['CQWPX']['CONTINENTS']['EU']['MIXED'] = {}
+    awards['CQ']['CQWPX']['CONTINENTS']['AS']['MIXED'] = {}
+    awards['CQ']['CQWPX']['CONTINENTS']['AF']['MIXED'] = {}
+    awards['CQ']['CQWPX']['CONTINENTS']['OC']['MIXED'] = {}
+
+    awards['CQ']['CQWPX']['CONTINENTS']['NA']['DIGITAL'] = {}
+    awards['CQ']['CQWPX']['CONTINENTS']['SA']['DIGITAL'] = {}
+    awards['CQ']['CQWPX']['CONTINENTS']['EU']['DIGITAL'] = {}     
+    awards['CQ']['CQWPX']['CONTINENTS']['AS']['DIGITAL'] = {}
+    awards['CQ']['CQWPX']['CONTINENTS']['AF']['DIGITAL'] = {}
+    awards['CQ']['CQWPX']['CONTINENTS']['OC']['DIGITAL'] = {}
+
 
 
     log.info ("CQ WPX: General Conditions")
-    cqwpxDetails = doCQWPX()
+    cqwpxDetails = doCQWPX('MIXED') # For everything
+    cqwpxDetailsDigital = doCQWPX('DIGITAL') # For everything
+
     doCQWPX_MODE ("Mixed", 400, all_mode, cqwpxDetails )
     doCQWPX_MODE ("CW", 300, cw_mode, cqwpxDetails )
     doCQWPX_MODE ("SSB", 300, ssb_mode, cqwpxDetails )
     doCQWPX_MODE ("Digital", 300, data_mode, cqwpxDetails )
 
-    doCQWPX_BAND ("160M", 50, cqwpxDetails)
-    doCQWPX_BAND ("80M", 175, cqwpxDetails)
-    doCQWPX_BAND ("160M", 175, cqwpxDetails)
-    doCQWPX_BAND ("40M", 250, cqwpxDetails)
-    doCQWPX_BAND ("30M", 250, cqwpxDetails)
-    doCQWPX_BAND ("20M", 300, cqwpxDetails)
-    doCQWPX_BAND ("17M", 300, cqwpxDetails)
-    doCQWPX_BAND ("15M", 300, cqwpxDetails)
-    doCQWPX_BAND ("12M", 300, cqwpxDetails)
-    doCQWPX_BAND ("10M", 300, cqwpxDetails)
-    doCQWPX_BAND ("6M", 250, cqwpxDetails)
+    doCQWPX_BAND ("160M", 'MIXED', 50, cqwpxDetails)
+    doCQWPX_BAND ("80M", 'MIXED', 175, cqwpxDetails)
+    doCQWPX_BAND ("160M", 'MIXED', 175, cqwpxDetails)
+    doCQWPX_BAND ("40M", 'MIXED', 250, cqwpxDetails)
+    doCQWPX_BAND ("30M", 'MIXED', 250, cqwpxDetails)
+    doCQWPX_BAND ("20M", 'MIXED', 300, cqwpxDetails)
+    doCQWPX_BAND ("17M", 'MIXED', 300, cqwpxDetails)
+    doCQWPX_BAND ("15M", 'MIXED', 300, cqwpxDetails)
+    doCQWPX_BAND ("12M", 'MIXED', 300, cqwpxDetails)
+    doCQWPX_BAND ("10M", 'MIXED', 300, cqwpxDetails)
+    doCQWPX_BAND ("6M", 'MIXED', 250, cqwpxDetails)
+
+    doCQWPX_BAND ("160M", 'DIGITAL', 50, cqwpxDetailsDigital)
+    doCQWPX_BAND ("80M", 'DIGITAL', 175, cqwpxDetailsDigital)
+    doCQWPX_BAND ("160M", 'DIGITAL', 175, cqwpxDetailsDigital)
+    doCQWPX_BAND ("40M", 'DIGITAL', 250, cqwpxDetailsDigital)
+    doCQWPX_BAND ("30M", 'DIGITAL', 250, cqwpxDetailsDigital)
+    doCQWPX_BAND ("20M", 'DIGITAL', 300, cqwpxDetailsDigital)
+    doCQWPX_BAND ("17M", 'DIGITAL', 300, cqwpxDetailsDigital)
+    doCQWPX_BAND ("15M", 'DIGITAL', 300, cqwpxDetailsDigital)
+    doCQWPX_BAND ("12M", 'DIGITAL', 300, cqwpxDetailsDigital)
+    doCQWPX_BAND ("10M", 'DIGITAL', 300, cqwpxDetailsDigital)
+    doCQWPX_BAND ("6M", 'DIGITAL', 250, cqwpxDetailsDigital)
 
 
+    doCQWPX_CONTINENT ("NA", "MIXED", 160)
+    doCQWPX_CONTINENT ("SA", "MIXED", 95)
+    doCQWPX_CONTINENT ("EU", "MIXED", 160)
+    doCQWPX_CONTINENT ("AF", "MIXED", 90)
+    doCQWPX_CONTINENT ("AS", "MIXED", 75)
+    doCQWPX_CONTINENT ("OC", "MIXED", 60)
 
-
-
-    doCQWPX_CONTINENT ("NA", 160)
-    doCQWPX_CONTINENT ("SA", 95)
-    doCQWPX_CONTINENT ("EU", 160)
-    doCQWPX_CONTINENT ("AF", 90)
-    doCQWPX_CONTINENT ("AS", 75)
-    doCQWPX_CONTINENT ("OC", 60)
+    doCQWPX_CONTINENT ("NA", "DIGITAL", 160)
+    doCQWPX_CONTINENT ("SA", "DIGITAL", 95)
+    doCQWPX_CONTINENT ("EU", "DIGITAL", 160)
+    doCQWPX_CONTINENT ("AF", "DIGITAL", 90)
+    doCQWPX_CONTINENT ("AS", "DIGITAL", 75)
+    doCQWPX_CONTINENT ("OC", "DIGITAL", 60)
 
 
 
