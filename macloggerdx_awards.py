@@ -455,7 +455,7 @@ def doCQWPX_CONTINENT(continent, mode,count):
             if not r.group() in prefixes:
                 prefixes.append(r.group())
             #print (r.group())
-    awards['CQ']['CQWPX']['CONTINENTS'][continent][mode] = {'Prefixes': len(prefixes), 'Required': count}
+    awards['CQ']['CQWPX']['CONTINENTS'][continent][mode] = {'Contacts': len(prefixes), 'Required': count, 'Notes': 'Contacts are prefixes'}
 
 
 def doCQWPX(mode):

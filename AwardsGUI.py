@@ -33,45 +33,58 @@ tree["columns"] = ('one') #("one", "two", 'three')
 tree.column("one")
 #tree.column("one", width=100)
 #tree.column("two", width=100)
-tree.heading("one", text="a")
+tree.heading("one", text="Details")
 #tree.heading("two", text="b")
 #tree.heading("three", text="c")
 
-#def add_node(k, v, key):
-#    for i, j in v.items():
-#        print ("--%s %s "%(i,j))
-#        tree.insert(k, 1, key + '.' + i, text=i + ' (' + str(k) + ')')
-#        if isinstance(j, dict):
-#            add_node(i, j, key + '.' + i)#
-
-#for k, v in hierarchy.items():
- #   tree.insert("", 1, k, text=k)
-#    print ("%s %s " % (k,v))
-#    if k == 'STATS':
-#        add_node(k, v, k)
+tree.tag_configure('AWARD-GOOD', background='green')
+tree.tag_configure('AWARD-ALMOST', background='orange')
+tree.tag_configure('AWARD-NONE', background='red')
 
 
-def json_tree(tree, parent, dictionary):
+def open_children(parent):
+    tree.item(parent, open=True)  # open parent
+    for child in tree.get_children(parent):
+        open_children(child)    # recursively open children
+
+def json_tree(tree, parent, dictionary, tag):
     # https://gist.github.com/lukestanley/8525f9fdcb903a43376a35a77575edff
     for key in dictionary:
         uid = uuid.uuid4()
         if isinstance(dictionary[key], dict):
             tree.insert(parent, 'end', uid, text=key)
-            json_tree(tree, uid, dictionary[key])
+            if 'Contacts' in dictionary[key] and 'Required' in dictionary[key]:
+                # If the sub-entry from here contains Contacts and Required, then create one and colour it
+                details = "%s/%s (%.1f%%)" % (str(dictionary[key]['Contacts']), str(dictionary[key]['Required']),
+                                          ((dictionary[key]['Contacts']/dictionary[key]['Required']*100)) )
+                c = ''
+                if dictionary[key]['Contacts'] >= dictionary[key]['Required']:
+                    c = 'AWARD-GOOD'
+                elif (dictionary[key]['Contacts'] / dictionary[key]['Required']) > 0.75:
+                    c = 'AWARD-ALMOST'
+                else:
+                    c = 'AWARD-NONE'                    
+                #print (details)
+                tree.insert (uid, 'end', uuid.uuid4(), text='Details', value=(details, None), tag=c)
+                k = dictionary[key]
+            json_tree(tree, uid, dictionary[key],'')
         elif isinstance(dictionary[key], list):
             tree.insert(parent, 'end', uid, text=key + '[]')
             json_tree(tree,
                       uid,
-                      dict([(i, x) for i, x in enumerate(dictionary[key])]))
+                      dict([(i, x) for i, x in enumerate(dictionary[key])]),
+                      '')
         else:
             value = dictionary[key]
             if value is None:
                 value = 'None'
-            tree.insert(parent, 'end', uid, text=key, value=(value, None))
+            tree.insert(parent, 'end', uid, text=key, value=(value, None), tag=tag) # value=(value, None) is a hack to not make strings go to different columns on space delimiter 
 
-json_tree(tree, '', hierarchy)
-
+json_tree(tree, '', hierarchy, '')
 
 
 tree.pack(expand=True, fill='both')
+
+open_children(tree.focus())
+
 root.mainloop()
