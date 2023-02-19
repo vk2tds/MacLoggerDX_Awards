@@ -72,6 +72,7 @@ def doINIT():
     global all_mode
 
     global oceania
+    global commonwealth
     global bands
 
     data_mode = ["LSB-D", "LSB-D2", "LSB-D3", "USB-D", "USB-D2", "USB-D3", "FM-D", "FM-D2", "FM-D3", "AM-D", "AM-D2", "AM-D3", "DIGITAL", 
@@ -92,7 +93,10 @@ def doINIT():
     all_mode = data_mode + cw_mode + phone_mode 
 
     oceania = (247,176,489,460,511,190,46,160,157,375,191,234,188,162,512,175,508,509,298,185,507,177,166,20,103,123,174,197,110,138,9,515,297,163,282,301,31,48,490,22,173,168,345,150,153,38,147,171,189,303,35,172,513,327,158,270,170,34,133,16)
-
+    commonwealth = (223, 114,265,122,279,106,294,233,257,402,322,181,379,406,464,33,452,250,205,274,493,201,4,165,207,468,470,450,286,430,432,440,
+        424,482,458,454,60,77,97,95,98,94,66,249,211,252,12,65,96,89,64,69,82,62,111,153,235,238,240,241,141,129,90,372,
+        305,324,11,142,283,315,215,159,299,247,381,160,157,191,234,188,185,507,163,282,301,31,48,490,345,150,35,38,147,189,172,513,
+        158,270,170,34,133, 16, 190, 46, 176, 489, 460)
 
     #ToDO Extend this
     # Unused
@@ -139,6 +143,19 @@ def doINIT():
     rtty_statement = rtty_statement + " ) and "
     #log.debug (rtty_statement)
     conditions["RTTY"] = rtty_statement
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -448,7 +465,7 @@ def doCQWPX(mode):
     details = {'160M': {}, '80M': {}, '40M': {}, '30M': {}, '20M': {}, '17M': {}, '15M': {}, '12M': {}, 
                '10M': {}, '6M': {}, '2M': {}, '70CM': {}, '23CM': {}, '3C': {}}
 
-    log.info ("      WPX - Any Mode" )
+    #log.info ("      WPX - Any Mode" )
     expr = "select DISTINCT call, band_rx, mode from qso_table_v007 where " + conditions['LoTW'] + " True "
     if mode == 'DIGITAL':
         expr += ' and ' + conditions['DATA'] + ' True'
@@ -529,7 +546,7 @@ def doNZART_NZAWARD():
 
 def doNZART_NZCENTURYAWARD():
     global awards
-    log.info ("NZART: NZ CENTURY AWARD")
+    #log.info ("NZART: NZ CENTURY AWARD")
 
     expr = 'select distinct grid ' + conditions['from'] 
     expr += "call like 'ZL%' and (grid like 'RE%' or grid like 'RF%' or grid like 'QD%' or grid like 'RD%' or grid like 'AE%' or grid like 'AF%') order by grid"
@@ -548,7 +565,7 @@ def doNZART_NZCENTURYAWARD():
 
 def doNZART_TIKI():
     global awards
-    log.info ("NZART: TIKI")
+    #log.info ("NZART: TIKI")
 
     expr = "select distinct count(call), band_rx "  + conditions['from'] + " call like '%ZL%' group by band_rx"
     res = cur.execute (expr)
@@ -567,7 +584,7 @@ def doNZART_TIKI():
 
 def doNZART_WORKEDALLPACIFIC():
     global awards
-    log.info ("NZART: WORKEDALLPACIFIC")
+    #log.info ("NZART: WORKEDALLPACIFIC")
 
     co = "("
     for code in continents:
@@ -603,7 +620,7 @@ def doINIT_Awards():
     awards['ARRL']['DXCC'] = {}
     awards['NZART'] = {'NZAWARD': {}, 'NZCENTURYAWARD': {}, 'TIKI': {}, 'WORKEDALLPACIFIC': {}}
     awards['ARRL']['DXCC']['Notes'] = "LoTW or Paper QSL Cards only; No Maritime Mobile; No Repeaters - Assuming None; No Satellite - Assuming none"
-
+    awards['RSGB'] = {'COMMONWEALTHCENTURY': {}}
 
 def doAWARDS_DXCC():
     global awards
@@ -703,7 +720,7 @@ def doAWARDS_CQWPX():
     awards['CQ']['CQWPX']['CONTINENTS']['DIGITAL'] = {}
     awards['CQ']['CQWPX']['CONTINENTS'] = {'NA': {'MIXED': {}, 'DIGITAL': {}}, 'SA': {'MIXED': {}, 'DIGITAL': {}}, 'EU': {'MIXED': {}, 'DIGITAL': {}}, 'AS': {'MIXED': {}, 'DIGITAL': {}}, 'AF': {'MIXED': {}, 'DIGITAL': {}}, 'OC': {'MIXED': {}, 'DIGITAL': {}}}
 
-    log.info ("CQ WPX: General Conditions")
+    #log.info ("CQ WPX: General Conditions")
     cqwpxDetails = doCQWPX('MIXED') # For everything
     cqwpxDetailsDigital = doCQWPX('DIGITAL') # For everything
 
@@ -756,11 +773,70 @@ def doAWARDS_CQWPX():
 def doAWARDS_NZART():
     global awards
 
-    log.info ("NZART Awards")
+    #log.info ("NZART Awards")
     doNZART_NZAWARD()
     doNZART_NZCENTURYAWARD()
     doNZART_TIKI()
     doNZART_WORKEDALLPACIFIC()
+
+
+def doRSGB_COMMONWEALTHCENTURY():
+    global awards
+
+
+    co = "("
+    for code in commonwealth:
+        co += " dxcc_id = " + str(code) + " or "
+    co += "false) "
+
+    expr = 'select distinct call, dxcc_id, dxcc_country, band_rx  ' + conditions['from'] + co + ' and ' + conditions['LoTWeQSL'] + ' true '
+    res = cur.execute (expr)
+    details = res.fetchall()
+
+    mods = {}
+    mods[1] = {'VE1': "Canada VE1", 'VE2': "Canada VE2", 'VE3': "Canada VE3", 'VE4': "Canada VE4", 'VE5': "Canada VE5", 
+               'VE6': "Canada VE6", 'VE7': "Canada VE7", 'VE8': "Canada VE8", 
+               'VO1': "Canada VO1", 'VO2': "Canada VO2", 'VY1': "Canada VY1", 'VY2': "Canada VY2", }
+    mods[150] = {'VK1': 'Australia VK1', 'VK2': 'Australia VK2', 'VK3': 'Australia VK3', 'VK4': 'Australia VK4', 
+                 'VK5': 'Australia VK5', 'VK6': 'Australia VK6', 'VK7': 'Australia VK7', 'VK8': 'Australia VK8', }
+    mods[170] = {'ZL1': 'New Zealand ZL1', 'ZL2': 'New Zealand ZL2', 'ZL3': 'New Zealand ZL3', 'ZL4': 'New Zealand ZL4'}
+
+
+    counts = {'160M': {}, '80M': {}, '40M': {}, '30M': {}, '20M': {}, '17M': {}, '15M': {}, '12M': {}, '10M': {}}
+
+    r = {}
+
+    for call, dxcc_id, dxcc_country, band_rx in details:
+        if dxcc_id in mods:
+            if not '/' in call: #ToDo - Fix this. 
+                if call[:3] in mods[dxcc_id]:
+                    dxcc_country = mods[dxcc_id][call[:3]]
+                    if band_rx in counts:
+                        counts[band_rx][dxcc_country] = call # Sample callsign
+        else:
+            counts[band_rx][dxcc_country] = call # Sample callsign
+    returns = {'Base': { 
+                    '80M': { 'Contacts': len(counts['80M']), 'Required': 40 }, 
+                    '40M': { 'Contacts': len(counts['40M']), 'Required': 40 }, 
+                    '20M': { 'Contacts': len(counts['20M']), 'Required': 40 }, 
+                    '15M': { 'Contacts': len(counts['15M']), 'Required': 40 }, 
+                    '10M': { 'Contacts': len(counts['10M']), 'Required': 40 }
+                    }, 
+                'Extension': {
+                    '160M': { 'Contacts': len(counts['160M']), 'Required': 40 }, 
+                    '30M': { 'Contacts': len(counts['30M']), 'Required': 40 }, 
+                    '17M': { 'Contacts': len(counts['17M']), 'Required': 40 }, 
+                    '12M': { 'Contacts': len(counts['12M']), 'Required': 40 } 
+                }
+    }
+    awards['RSGB']['COMMONWEALTHCENTURY'] = returns 
+
+
+def doAWARDS_RSGB():
+    global awards
+    doRSGB_COMMONWEALTHCENTURY()
+
+
 
 def doSTATS():
     global awards
@@ -784,8 +860,8 @@ if True:
     doAWARDS_DXCC()
     doAWARDS_CQWAZ()
     doAWARDS_CQWPX()
-
     doAWARDS_NZART()
+    doAWARDS_RSGB()
     doSTATS()
 
 
@@ -795,6 +871,7 @@ if True:
     f.write (parseString(xml).toprettyxml())
     f.close()
 
+if __name__ == "__main__":
 
     pp.pprint (awards)
 
