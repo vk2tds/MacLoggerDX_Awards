@@ -534,11 +534,11 @@ def doNZART_NZAWARD():
             if call[:3] == 'ZL7' or call[:3] == 'ZL8' or call[:3] == 'ZL9':
                 zl['ZL4'].append (call)
     all = {}
-    all['ZL1'] = {'Contatcs': len (zl['ZL1']), 'Required': 35}
-    all['ZL2'] = {'Contatcs': len (zl['ZL2']), 'Required': 35}
-    all['ZL3'] = {'Contatcs': len (zl['ZL3']), 'Required': 20}
-    all['ZL4'] = {'Contatcs': len (zl['ZL4']), 'Required': 10}
-    all['ZL789'] = {'Contatcs': len (zl['ZL789']), 'Required': 1, 'Notes': 'Special Conditions'}
+    all['ZL1'] = {'Contacts': len (zl['ZL1']), 'Required': 35}
+    all['ZL2'] = {'Contacts': len (zl['ZL2']), 'Required': 35}
+    all['ZL3'] = {'Contacts': len (zl['ZL3']), 'Required': 20}
+    all['ZL4'] = {'Contacts': len (zl['ZL4']), 'Required': 10}
+    all['ZL789'] = {'Contacts': len (zl['ZL789']), 'Required': 1, 'Notes': 'Special Conditions'}
     all['Notes'] = 'Require ZL1,2,3&4 and one contact with an external teritory etc'
 
     awards['NZART']['NZAWARD'] = all
@@ -621,6 +621,7 @@ def doINIT_Awards():
     awards['NZART'] = {'NZAWARD': {}, 'NZCENTURYAWARD': {}, 'TIKI': {}, 'WORKEDALLPACIFIC': {}}
     awards['ARRL']['DXCC']['Notes'] = "LoTW or Paper QSL Cards only; No Maritime Mobile; No Repeaters - Assuming None; No Satellite - Assuming none"
     awards['RSGB'] = {'COMMONWEALTHCENTURY': {}}
+    awards['WIA'] = {'GRID': {}, 'WORKEDALLVK': {}}
 
 def doAWARDS_DXCC():
     global awards
@@ -656,19 +657,19 @@ def doAWARDS_DXCC():
     awards['ARRL']['DXCC']['5BDXCC'] = { 'Notes': 'Any Mode, 100 each on 80M, 40M, 20M, 15M, 10M; then endorceable for 160M, 30M, 17M, 12M, 6M, 2M'}
 
     awards['ARRL']['DXCC']['5BDXCC']['Primary'] = {}
-    awards['ARRL']['DXCC']['5BDXCC']['Primary']['80M'] = {'Contacts': awards['ARRL']['DXCC']['80M']['Contacts'], 'Count':100}
-    awards['ARRL']['DXCC']['5BDXCC']['Primary']['40M'] = {'Contacts': awards['ARRL']['DXCC']['40M']['Contacts'], 'Count':100}
-    awards['ARRL']['DXCC']['5BDXCC']['Primary']['20M'] = {'Contacts': awards['ARRL']['DXCC']['20M']['Contacts'], 'Count':100}
-    awards['ARRL']['DXCC']['5BDXCC']['Primary']['15M'] = {'Contacts': awards['ARRL']['DXCC']['15M']['Contacts'], 'Count':100}
-    awards['ARRL']['DXCC']['5BDXCC']['Primary']['10M'] = {'Contacts': awards['ARRL']['DXCC']['10M']['Contacts'], 'Count':100}
+    awards['ARRL']['DXCC']['5BDXCC']['Primary']['80M'] = {'Contacts': awards['ARRL']['DXCC']['80M']['Contacts'], 'Required':100}
+    awards['ARRL']['DXCC']['5BDXCC']['Primary']['40M'] = {'Contacts': awards['ARRL']['DXCC']['40M']['Contacts'], 'Required':100}
+    awards['ARRL']['DXCC']['5BDXCC']['Primary']['20M'] = {'Contacts': awards['ARRL']['DXCC']['20M']['Contacts'], 'Required':100}
+    awards['ARRL']['DXCC']['5BDXCC']['Primary']['15M'] = {'Contacts': awards['ARRL']['DXCC']['15M']['Contacts'], 'Required':100}
+    awards['ARRL']['DXCC']['5BDXCC']['Primary']['10M'] = {'Contacts': awards['ARRL']['DXCC']['10M']['Contacts'], 'Required':100}
 
     awards['ARRL']['DXCC']['5BDXCC']['Endorcements'] = {}
-    awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['160M'] = {'Contacts': awards['ARRL']['DXCC']['160M']['Contacts'], 'Count':100}
-    awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['30M'] = {'Contacts': awards['ARRL']['DXCC']['30M']['Contacts'], 'Count':100}
-    awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['17M'] = {'Contacts': awards['ARRL']['DXCC']['17M']['Contacts'], 'Count':100}
-    awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['12M'] = {'Contacts': awards['ARRL']['DXCC']['12M']['Contacts'], 'Count':100}
-    awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['6M'] = {'Contacts': awards['ARRL']['DXCC']['6M']['Contacts'], 'Count':100}
-    awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['2M'] = {'Contacts': awards['ARRL']['DXCC']['2M']['Contacts'], 'Count':100}
+    awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['160M'] = {'Contacts': awards['ARRL']['DXCC']['160M']['Contacts'], 'Required':100}
+    awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['30M'] = {'Contacts': awards['ARRL']['DXCC']['30M']['Contacts'], 'Required':100}
+    awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['17M'] = {'Contacts': awards['ARRL']['DXCC']['17M']['Contacts'], 'Required':100}
+    awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['12M'] = {'Contacts': awards['ARRL']['DXCC']['12M']['Contacts'], 'Required':100}
+    awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['6M'] = {'Contacts': awards['ARRL']['DXCC']['6M']['Contacts'], 'Required':100}
+    awards['ARRL']['DXCC']['5BDXCC']['Endorcements']['2M'] = {'Contacts': awards['ARRL']['DXCC']['2M']['Contacts'], 'Required':100}
 
 
     challenge = awards['ARRL']['DXCC']['160M']['Contacts'] + awards['ARRL']['DXCC']['80M']['Contacts'] + awards['ARRL']['DXCC']['40M']['Contacts'] + awards['ARRL']['DXCC']['30M']['Contacts'] + \
@@ -780,6 +781,24 @@ def doAWARDS_NZART():
     doNZART_WORKEDALLPACIFIC()
 
 
+def doWIA_GRID():
+    global awards
+
+
+    expr = 'select count(distinct  substr(grid,1,4)) ' + conditions['from'] + conditions['no_maritime'] + conditions['LoTW'] +  ' grid is not NULL'
+    res = cur.execute (expr)
+    print (res)
+    awards['WIA']['GRID'] = {'Contacts':res.fetchone()[0], 'Required':100, 
+        'Notes': 'Assumes HF only'}
+
+
+def doAWARDS_WIA():
+    global awards
+    #awards['WIA'] = {'GRID': {}, 'WORKEDALLVK': {}}
+
+    doWIA_GRID()
+
+
 def doRSGB_COMMONWEALTHCENTURY():
     global awards
 
@@ -862,6 +881,7 @@ if True:
     doAWARDS_CQWPX()
     doAWARDS_NZART()
     doAWARDS_RSGB()
+    doAWARDS_WIA()
     doSTATS()
 
 
