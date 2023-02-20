@@ -578,7 +578,7 @@ def doNZART_TIKI():
         if count >= 5:
             c += 1
 
-    awards['NZART']['TIKI'] = {'Bands': r, 'BandsQualified': c, 'Required': 5}
+    awards['NZART']['TIKI'] = {'Bands': r, 'Contacts': c, 'Required': 5}
 
 
 
@@ -603,7 +603,7 @@ def doNZART_WORKEDALLPACIFIC():
         if count >= 30:
             c += 1
 
-    awards['NZART']['WORKEDALLPACIFIC'] = {'Bands': r, 'BandsQualified': c, 'Required': 5}
+    awards['NZART']['WORKEDALLPACIFIC'] = {'Bands': r, 'Contacts': c, 'Required': 5}
 
     #print (expr)
     #print (details)
@@ -781,6 +781,117 @@ def doAWARDS_NZART():
     doNZART_WORKEDALLPACIFIC()
 
 
+
+def doWIA_WORKEDALLVK ():
+    global awards
+
+
+    expr = 'with '
+    select = 'select * from '
+
+    for area in ('VK0',):
+
+        expr += '%sC as' % (area)
+        expr += '(select count( distinct call) '
+        expr += conditions['from']
+        expr += 'call like "%s%%" and ' % (area)
+        expr += conditions['LoTW']
+        expr += conditions['no_maritime'] + " True), \n"
+
+        expr += '%sB as' % (area)
+        expr += '(select count( distinct dxcc_country) '
+        expr += conditions['from']
+        expr += 'call like "%s%%" and ' % (area)
+        expr += conditions['LoTW']
+        expr += conditions['no_maritime'] + " True), \n"
+
+        select += '%sC, %sB, ' % (area, area)
+
+    for area in ('VK1', 'VK2', 'VK3', 'VK4', 'VK5', 'VK6', 'VK7', 'VK8'):
+
+        expr += '%sC as' % (area)
+        expr += '(select count( distinct call) '
+        expr += conditions['from']
+        expr += 'call like "%s%%" and ' % (area)
+        expr += conditions['LoTW']
+        expr += conditions['no_maritime'] + " True), \n"
+
+        expr += '%sB as' % (area)
+        expr += '(select count( distinct band_tx) '
+        expr += conditions['from']
+        expr += 'call like "%s%%" and ' % (area)
+        expr += conditions['LoTW']
+        expr += conditions['no_maritime'] + " True), \n"
+
+        select += '%sC, %sB, ' % (area, area)
+
+    for area in ('VK9',):
+
+        expr += '%sC as' % (area)
+        expr += '(select count( distinct call) '
+        expr += conditions['from']
+        expr += 'call like "%s%%" and ' % (area)
+        expr += conditions['LoTW']
+        expr += conditions['no_maritime'] + " True), \n"
+
+        expr += '%sB as' % (area)
+        expr += '(select count( distinct dxcc_country) '
+        expr += conditions['from']
+        expr += 'call like "%s%%" and ' % (area)
+        expr += conditions['LoTW']
+        expr += conditions['no_maritime'] + " True), \n"
+
+        select += '%sC, %sB, ' % (area, area)
+
+    expr = expr[:len(expr)-3]
+
+    expr += select
+
+    expr = expr[:len(expr)-2]
+
+    print (expr)
+
+    res = cur.execute (expr)
+    details = res.fetchone()
+    print (details)
+
+    awards['WIA']['WORKEDALLVK']['AREAS'] = {}
+    awards['WIA']['WORKEDALLVK']['Notes'] = 'For VK ops only. Different rules for DX'
+
+    calls = (3,3,10,10,10,10,10,3,3,4)
+    div = (2,2,3,3,3,3,3,2,2,3)
+
+    count_calls = 0
+    count_diversity = 0 
+
+    i = 0
+    j = 0
+    for area in ('VK0','VK1', 'VK2', 'VK3', 'VK4', 'VK5', 'VK6', 'VK7', 'VK8', 'VK9'):
+        awards['WIA']['WORKEDALLVK']['AREAS'][area] = {'Notes': 'Diversity is Bands, or DXCC for VK0 and VK9',
+                                                       'Calls': {},
+                                                       'Diversity': {}}
+        awards['WIA']['WORKEDALLVK']['AREAS'][area]['Calls']['Contacts'] = details[i]
+        awards['WIA']['WORKEDALLVK']['AREAS'][area]['Calls']['Required'] = calls[j]
+        if details[i] >= calls[j]: 
+            count_calls += 1
+        i += 1
+        awards['WIA']['WORKEDALLVK']['AREAS'][area]['Diversity']['Contacts'] = details[i]
+        awards['WIA']['WORKEDALLVK']['AREAS'][area]['Diversity']['Required'] = div[j]
+        if details[i] >= div[j]:
+            count_diversity += 1    
+        i += 1
+        j += 1
+
+        awards['WIA']['WORKEDALLVK']['CONTACTS'] = {'Contacts': count_calls, 
+                                                    'Required': 10, 
+                                                    'Notes': 'Contacts is number of AREAS met with callsign'}
+        awards['WIA']['WORKEDALLVK']['DIVERSITY'] = {'Contacts': count_diversity, 
+                                                    'Required': 10, 
+                                                    'Notes': 'Diversity is number of AREAS met with band or DXCC'}
+
+
+
+
 def doWIA_GRID():
     global awards
 
@@ -789,7 +900,7 @@ def doWIA_GRID():
     res = cur.execute (expr)
     print (res)
     awards['WIA']['GRID'] = {'Contacts':res.fetchone()[0], 'Required':100, 
-        'Notes': 'Assumes HF only'}
+        'Max': 1800, 'Notes': 'Assumes HF only'}
 
 
 def doAWARDS_WIA():
@@ -797,6 +908,8 @@ def doAWARDS_WIA():
     #awards['WIA'] = {'GRID': {}, 'WORKEDALLVK': {}}
 
     doWIA_GRID()
+    doWIA_WORKEDALLVK()
+
 
 
 def doRSGB_COMMONWEALTHCENTURY():
