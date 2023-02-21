@@ -541,7 +541,7 @@ def doNZART_NZAWARD():
     all['ZL789'] = {'Contacts': len (zl['ZL789']), 'Required': 1, 'Notes': 'Special Conditions'}
     all['Notes'] = 'Require ZL1,2,3&4 and one contact with an external teritory etc'
 
-    awards['NZART']['NZAWARD'] = all
+    awards['NZART']['NZAWARD'].update ( all)
 
 
 def doNZART_NZCENTURYAWARD():
@@ -560,7 +560,7 @@ def doNZART_NZCENTURYAWARD():
         if len(grid) == 6:
             grids.append (grid)
 
-    awards['NZART']['NZCENTURYAWARD'] = {'Contacts': len(grids), "Required": 100}
+    awards['NZART']['NZCENTURYAWARD'].update ( {'Contacts': len(grids), "Required": 100})
 
 
 def doNZART_TIKI():
@@ -578,7 +578,7 @@ def doNZART_TIKI():
         if count >= 5:
             c += 1
 
-    awards['NZART']['TIKI'] = {'Bands': r, 'Contacts': c, 'Required': 5}
+    awards['NZART']['TIKI'].update ( {'Bands': r, 'Contacts': c, 'Required': 5})
 
 
 
@@ -603,7 +603,7 @@ def doNZART_WORKEDALLPACIFIC():
         if count >= 30:
             c += 1
 
-    awards['NZART']['WORKEDALLPACIFIC'] = {'Bands': r, 'Contacts': c, 'Required': 5}
+    awards['NZART']['WORKEDALLPACIFIC'].update ({'Bands': r, 'Contacts': c, 'Required': 5})
 
     #print (expr)
     #print (details)
@@ -614,14 +614,18 @@ def doINIT_Awards():
     global awards    
 
     awards = {}
-    awards['CQ'] = {'CQWAZ': {}, 'CQWPX': {}}
+    awards['CQ'] = {'CQWAZ': {'Name': 'CQ - Worked All Zones'}, 'CQWPX': {'Name': 'CQ - Worked Prefixes'}}
     awards['STATS'] = {}
     awards['ARRL'] = {}
     awards['ARRL']['DXCC'] = {}
-    awards['NZART'] = {'NZAWARD': {}, 'NZCENTURYAWARD': {}, 'TIKI': {}, 'WORKEDALLPACIFIC': {}}
+    awards['NZART'] = {'NZAWARD': {'Name': 'NZART NZ Award - Work about 101 ZL\'s'},
+                        'NZCENTURYAWARD': {'Name': 'NZART Century Award - Work 100 Grid Squares'},
+                        'TIKI': {'Name': 'NZART TIKI Award - Work 5 ZL callsigns on 5 Bands'},
+                        'WORKEDALLPACIFIC': {'Name': 'NZARD Worked All Pacific - Work at least 30 DXCC'}}
     awards['ARRL']['DXCC']['Notes'] = "LoTW or Paper QSL Cards only; No Maritime Mobile; No Repeaters - Assuming None; No Satellite - Assuming none"
-    awards['RSGB'] = {'COMMONWEALTHCENTURY': {}}
-    awards['WIA'] = {'GRID': {}, 'WORKEDALLVK': {}}
+    awards['RSGB'] = {'COMMONWEALTHCENTURY': {'Name': 'RSGB Commonwealth Century - Work 40 Commonwealth DXCC on each of 5 bands with extensions'}}
+    awards['WIA'] = {'GRID': {'Name': 'WIA Grid - Work 100 VK Grid Squares'}, 
+                     'WORKEDALLVK': {'Name': 'WIA Worked All VK - Work a combination of VK prefixes on a combination of bands'}}
 
 def doAWARDS_DXCC():
     global awards
@@ -682,8 +686,8 @@ def doAWARDS_DXCC():
 def doAWARDS_CQWAZ():
     global awards
 
-    awards['CQ']['CQWAZ'] = {'Notes': 'LoTW, eQSL or Paper QSL Cards only; No Satellite; Assuming eQSL is Authenticity Guarenteed; Assuming no satellites. Assuming dates OK ', 
-                             'URL': 'https://cq-amateur-radio.com/cq_awards/cq_waz_awards/june2022-Final-with-color-break-for-Jose-to-review-Rev-B.pdf'}
+    awards['CQ']['CQWAZ']['Notes'] = 'LoTW, eQSL or Paper QSL Cards only; No Satellite; Assuming eQSL is Authenticity Guarenteed; Assuming no satellites. Assuming dates OK '
+    awards['CQ']['CQWAZ']['URL'] = 'https://cq-amateur-radio.com/cq_awards/cq_waz_awards/june2022-Final-with-color-break-for-Jose-to-review-Rev-B.pdf'
 
     doCQWAZ_MIXED ()
 
@@ -785,6 +789,7 @@ def doAWARDS_NZART():
 def doWIA_WORKEDALLVK ():
     global awards
 
+    # Complex award with combo of calls worked and either bands or DXCC entities
 
     expr = 'with '
     select = 'select * from '
@@ -844,16 +849,11 @@ def doWIA_WORKEDALLVK ():
         select += '%sC, %sB, ' % (area, area)
 
     expr = expr[:len(expr)-3]
-
     expr += select
-
     expr = expr[:len(expr)-2]
-
-    print (expr)
 
     res = cur.execute (expr)
     details = res.fetchone()
-    print (details)
 
     awards['WIA']['WORKEDALLVK']['AREAS'] = {}
     awards['WIA']['WORKEDALLVK']['Notes'] = 'For VK ops only. Different rules for DX'
@@ -898,9 +898,10 @@ def doWIA_GRID():
 
     expr = 'select count(distinct  substr(grid,1,4)) ' + conditions['from'] + conditions['no_maritime'] + conditions['LoTW'] +  ' grid is not NULL'
     res = cur.execute (expr)
-    print (res)
-    awards['WIA']['GRID'] = {'Contacts':res.fetchone()[0], 'Required':100, 
-        'Max': 1800, 'Notes': 'Assumes HF only'}
+    awards['WIA']['GRID']['Contacts'] = res.fetchone()[0]
+    awards['WIA']['GRID']['Required'] = 100 
+    awards['WIA']['GRID']['Max'] = 1800
+    awards['WIA']['GRID']['Notes'] = 'Assumes HF only'
 
 
 def doAWARDS_WIA():
@@ -961,7 +962,7 @@ def doRSGB_COMMONWEALTHCENTURY():
                     '12M': { 'Contacts': len(counts['12M']), 'Required': 40 } 
                 }
     }
-    awards['RSGB']['COMMONWEALTHCENTURY'] = returns 
+    awards['RSGB']['COMMONWEALTHCENTURY'].update (returns)
 
 
 def doAWARDS_RSGB():
