@@ -41,6 +41,12 @@ tree.tag_configure('AWARD-GOOD', background='green')
 tree.tag_configure('AWARD-ALMOST', background='orange')
 tree.tag_configure('AWARD-NONE', background='red')
 
+def open_top(parent):
+    tree.item(parent, open=True)  # open parent
+    for child in tree.get_children(parent):
+        tree.item(child, open=True)  # open parent
+        #open_children(child)    # recursively open children
+
 
 def open_children(parent):
     tree.item(parent, open=True)  # open parent
@@ -85,6 +91,7 @@ json_tree(tree, '', hierarchy, '')
 
 tree.pack(expand=True, fill='both')
 
-open_children(tree.focus())
+#open_children(tree.focus())
+open_top(tree.focus())
 
 root.mainloop()

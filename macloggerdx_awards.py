@@ -275,10 +275,13 @@ def doSTATS_BANDS ():
     res = cur.execute (expr)
     details = res.fetchall()
     combined = []
+    
+    awards['STATS']['STATS_BANDS'] = {}
     for count, band in details:
-        combined.append ({'Count': count, 'Band': band})
+        #combined.append ({'Count': count, 'Band': band})
+        awards['STATS']['STATS_BANDS'][band] = count
 
-    awards['STATS']['STATS_BANDS'] = combined
+    #awards['STATS']['STATS_BANDS'] = combined
 
 def doSTATS_MODES ():
     global awards
@@ -291,9 +294,10 @@ def doSTATS_MODES ():
     res = cur.execute (expr)
     details = res.fetchall()
     combined = []
+    awards['STATS']['STATS_MODES'] = {}
     for count, mode in details:
-        combined.append ({'Count': count, 'Mode': mode})
-    awards['STATS']['STATS_MODES'] = combined
+        #combined.append ({'Count': count, 'Mode': mode})
+        awards['STATS']['STATS_MODES'][mode] = count
     #log.info ("        Modes - %s" %(['STATS_MODES']))
 
 def doSTATS_DXCCBYDATE ():
@@ -311,18 +315,25 @@ def doSTATS_DXCCBYDATE ():
     expr += conditions['no_maritime'] + " True "
     expr += "order by dxcc_country, qso_done"
 
+    print (expr)
+
     res = cur.execute (expr)
 
     last_dxcc = ""
-    awards['STATS']['STATS_DXCCBYDATE'] = []
+    awards['STATS']['STATS_DXCCBYDATE'] = {}
+    stats = {}
     for dxcc, day in res.fetchall():
         if dxcc != last_dxcc:
             day = str(datetime.datetime.fromtimestamp(day))
-            awards['STATS']['STATS_DXCCBYDATE'].append ({'DXCC':dxcc, 'Day':day})
+            #awards['STATS']['STATS_DXCCBYDATE'].append ({'DXCC':dxcc, 'Day':day})
+            stats[dxcc] = day[:19]
             last_dxcc = dxcc
     #log.info ("        Modes - %s" %(awards['STATS']['STATS_DXCCBYDATE']))
-
-
+    stats = {k: v for k, v in sorted(stats.items(), key=lambda item: item[1])}    
+    i = 1
+    for k in stats:
+        awards['STATS']['STATS_DXCCBYDATE']["%03d " % (i) + k] = stats[k]
+        i += 1
 
 
 def doCQWAZ_MIXED ():
