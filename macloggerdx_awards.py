@@ -55,10 +55,13 @@ conditions = {"no_maritime": " not call like '%/MM' and ",
               "startCQWAZ": " select count (distinct cq_zone) ",
               "startCQWAZ_BAND": " select distinct count(*), mode , band_rx from ( select  count(*) as c, cq_zone, mode, band_rx ",
               "stopCQWAZ_BAND": " group by  cq_zone, mode, band_rx ) group by mode, band_rx ",
+              "WAS": " (dxcc_id = 291 or dxcc_id = 6 or dxcc_id = 110) and ",
               "from": " from qso_table_v007  where ",
               "end": " True "}
 
-
+#select distinct state, band_rx, mode from qso_table_v007 
+#where (dxcc_id = 291 or dxcc_id = 6 or dxcc_id = 110) 
+#group by band_rx, mode, state
 
 
 def doINIT():
@@ -315,8 +318,6 @@ def doSTATS_DXCCBYDATE ():
     expr += conditions['no_maritime'] + " True "
     expr += "order by dxcc_country, qso_done"
 
-    print (expr)
-
     res = cur.execute (expr)
 
     last_dxcc = ""
@@ -400,6 +401,20 @@ def doDXCC_MISSINGQSL():
     output = res.fetchall()
     awards['ARRL']['DXCC']['DXCC_MISSINGQSL'] = {'DXCC': output, 'Count': len(output)}
     #log.info ("        %s" %(awards['ARRL']['DXCC']['DXCC_MISSINGQSL']))
+
+def doDXCC_CONFIRMEDCOUNTRYCOUNTS():
+    global awards
+    
+    expr = 'select distinct count(*) as C, dxcc_country from qso_table_v007 where '
+    expr = expr + conditions['no_maritime'] + conditions['LoTW'] + ' True '
+    expr = expr + 'group by dxcc_country order by c DESC'
+    print (expr)
+    
+    res = cur.execute (expr)
+    calls = res.fetchall()
+    awards['ARRL']['DXCC']['DXCC_CONFIRMEDCOUNTRYCOUNT'] = []
+    for count, dxcc in calls:
+        awards['ARRL']['DXCC']['DXCC_CONFIRMEDCOUNTRYCOUNT'].append ({'DXCC': dxcc, 'Count': count})
 
 
 def doCQWPX_MODE(mode_desc, count, modes, details):
@@ -666,6 +681,7 @@ def doAWARDS_DXCC():
     awards['ARRL']['DXCC']['3CM']['Notes'] = 'Satellites Now Permitted - Still not checked'
 
     doDXCC_MISSINGQSL ()
+    doDXCC_CONFIRMEDCOUNTRYCOUNTS ()
 
     awards['ARRL']['DXCC']['Satellite'] = {'Notes': 'ToDo: No Satellite Log Analysis has been done'}
 
@@ -919,6 +935,8 @@ def doAWARDS_WIA():
     global awards
     #awards['WIA'] = {'GRID': {}, 'WORKEDALLVK': {}}
 
+    awards['WIA']['WIAOCEANIA'] = {}
+    awards['WIA']['WIAWORKEDALLCONTINENTS'] = {'Note': 'Physical cards only. I mean, SERIOUSLY?'}
     doWIA_GRID()
     doWIA_WORKEDALLVK()
 
