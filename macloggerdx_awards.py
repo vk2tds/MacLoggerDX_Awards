@@ -47,13 +47,15 @@ pp = pprint.PrettyPrinter(indent=4)
 
 
 
+
+
 conditions = {"no_maritime": " not call like '%/MM' and ",
               "LoTW": " qsl_received like '%LoTW%' and ",
               "eQSL": " qsl_received like '%eQSL%' and ",
               "LoTWeQSL": " (qsl_received like '%LoTW%' or qsl_received like '%eQSL%') and ",
               "startDXCC": " select count (distinct dxcc_country) ",
-              "startCQWAZ": " select count (distinct cq_zone) ",
-              "startCQWAZ_BAND": " select distinct count(*), mode , band_rx from ( select  count(*) as c, cq_zone, mode, band_rx ",
+              "startCQWAZ": " select count ( distinct iif (substr(cq_zone,1,1) == '0', substr(cq_zone,2), cq_zone)) ",
+              "startCQWAZ_BAND": " select distinct count(distinct iif (substr(cq_zone,1,1) == '0', substr(cq_zone,2), cq_zone)), mode , band_rx from ( select  count(*) as c, cq_zone, mode, band_rx ",
               "stopCQWAZ_BAND": " group by  cq_zone, mode, band_rx ) group by mode, band_rx ",
               "WAS": " (dxcc_id = 291 or dxcc_id = 6 or dxcc_id = 110) and ",
               "from": " from qso_table_v007  where ",
@@ -303,6 +305,37 @@ def doSTATS_MODES ():
         awards['STATS']['STATS_MODES'][mode] = count
     #log.info ("        Modes - %s" %(['STATS_MODES']))
 
+
+def doSTATS_GRIDS ():
+    global awards
+    
+    # https://www.amsat.org/amsat/articles/houston-net/grids.html
+    awards['STATS']['STATS_GRIDS'] = {}
+    awards['STATS']['STATS_GRIDS']['Notes'] = 'Fields are two letter grids squares. Grids are four letter ones. Does not check for QSL'
+
+    expr = "select count(*), substr(grid,1,2) "
+    expr += conditions ['from']
+    expr += " grid is not NULL and grid != '' group by substr(grid,1,2)"
+
+    res = cur.execute (expr)
+    details = res.fetchall()
+    combined = []
+    awards['STATS']['STATS_GRIDS']['Fields'] = len(details)
+    awards['STATS']['STATS_GRIDS']['Fields_Count'] = '324'
+
+    expr = "select count(*), substr(grid,1,4) "
+    expr += conditions ['from']
+    expr += " grid is not NULL and grid != '' group by substr(grid,1,4)"
+
+    res = cur.execute (expr)
+    details = res.fetchall()
+    combined = []
+    awards['STATS']['STATS_GRIDS']['Grids'] = len(details)
+    awards['STATS']['STATS_GRIDS']['Grids_Count'] = '32400'
+
+
+
+
 def doSTATS_DXCCBYDATE ():
     global awards
 
@@ -340,7 +373,7 @@ def doSTATS_DXCCBYDATE ():
 def doCQWAZ_MIXED ():
     global awards
 
-    expr = conditions['startCQWAZ'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTWeQSL'] + conditions['end']
+    expr = conditions['startCQWAZ'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTWeQSL'] + "cq_zone != '' and cq_zone != '1-5' and " + conditions['end']
     res = cur.execute (expr)
     awards['CQ']['CQWAZ']['CQWAZ_MIXED'] = {'Contacts':res.fetchone()[0], 'Required':40}
 
@@ -348,7 +381,7 @@ def doCQWAZ_MIXED ():
 def doCQWAZ_BAND(band):
     global awards
 
-    expr = conditions['startCQWAZ_BAND'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTWeQSL'] + " band_rx = '" + band + "' and " + conditions['end'] + conditions['stopCQWAZ_BAND']
+    expr = conditions['startCQWAZ_BAND'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTWeQSL'] + " band_rx = '" + band + "' and " + "cq_zone != '' and cq_zone != '1-5' and " + conditions['end'] + conditions['stopCQWAZ_BAND']
     res = cur.execute (expr)
     w = res.fetchall()
     x = []
@@ -359,14 +392,14 @@ def doCQWAZ_BAND(band):
 def doCQWAZ(band):
     global awards
 
-    expr = conditions['startCQWAZ'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTWeQSL'] + " band_rx = '" + band + "' and " + conditions['end']
+    expr = conditions['startCQWAZ'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTWeQSL'] + " band_rx = '" + band + "' and " + "cq_zone != '' and cq_zone != '1-5' and " + conditions['end']
     res = cur.execute (expr)
     awards['CQ']['CQWAZ']['CQWAZ_' + band] = {'Contacts':res.fetchone()[0], 'Required':40}
 
 def doCQWAZ_MODE (mode):
     global awards
 
-    expr = conditions['startCQWAZ'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTWeQSL'] + conditions[mode] + conditions['end']
+    expr = conditions['startCQWAZ'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTWeQSL'] + conditions[mode] + "cq_zone != '' and cq_zone != '1-5' and " + conditions['end']
     res = cur.execute (expr)
     awards['CQ']['CQWAZ']['CQWAZ_' + mode] = {'Contacts':res.fetchone()[0], 'Required':40}
 
@@ -408,7 +441,7 @@ def doDXCC_CONFIRMEDCOUNTRYCOUNTS():
     expr = 'select distinct count(*) as C, dxcc_country from qso_table_v007 where '
     expr = expr + conditions['no_maritime'] + conditions['LoTW'] + ' True '
     expr = expr + 'group by dxcc_country order by c DESC'
-    print (expr)
+    #print (expr)
     
     res = cur.execute (expr)
     calls = res.fetchall()
@@ -1008,6 +1041,7 @@ def doSTATS():
     doSTATS_BANDS()
     doSTATS_MODES()
     doSTATS_DXCCBYDATE()
+    doSTATS_GRIDS()
 
 
 
