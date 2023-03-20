@@ -1,4 +1,4 @@
-#!/usr/local/python3
+#!/opt/local/bin/python3
 
 # This code was developed for MacOS but should work under Windows and Linux
 
