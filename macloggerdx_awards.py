@@ -28,6 +28,9 @@ import datetime
 import json
 from dicttoxml import dicttoxml
 from xml.dom.minidom import parseString
+from collections import OrderedDict
+import tabulate
+
 
 
 
@@ -47,7 +50,7 @@ pp = pprint.PrettyPrinter(indent=4)
 
 
 
-
+qso_table = 'qso_table_v008'
 
 conditions = {"no_maritime": " not call like '%/MM' and ",
               "LoTW": " qsl_received like '%LoTW%' and ",
@@ -58,12 +61,17 @@ conditions = {"no_maritime": " not call like '%/MM' and ",
               "startCQWAZ_BAND": " select distinct count(distinct iif (substr(cq_zone,1,1) == '0', substr(cq_zone,2), cq_zone)), mode , band_rx from ( select  count(*) as c, cq_zone, mode, band_rx ",
               "stopCQWAZ_BAND": " group by  cq_zone, mode, band_rx ) group by mode, band_rx ",
               "WAS": " (dxcc_id = 291 or dxcc_id = 6 or dxcc_id = 110) and ",
-              "from": " from qso_table_v007  where ",
+              "from": " from " + qso_table + " where ",
               "end": " True "}
 
-#select distinct state, band_rx, mode from qso_table_v007 
+#select distinct state, band_rx, mode from qso_table_v008 
 #where (dxcc_id = 291 or dxcc_id = 6 or dxcc_id = 110) 
 #group by band_rx, mode, state
+
+
+
+
+
 
 
 def doINIT():
@@ -233,6 +241,70 @@ def doGetDXCC_Continent():
     return continents
 
 
+def doGetDXCC_table():
+
+
+    dxcc_lotw_confirmed = 'select count(call), band_tx, dxcc_country from ' + qso_table + ' where '
+    dxcc_qso_confirmed = 'select count(call), band_tx, dxcc_country from ' + qso_table + ' where '
+
+    dxcc_lotw_confirmed += conditions['no_maritime'] + conditions['LoTW'] + ' True '
+    dxcc_qso_confirmed += conditions['no_maritime'] + ' True '
+
+    dxcc_lotw_confirmed += ' group by dxcc_country, band_tx'
+    dxcc_qso_confirmed += ' group by dxcc_country, band_tx'
+
+    awards['ARRL']['DXCC']['Table'] = {}
+    working = {}
+
+    res = cur.execute (dxcc_qso_confirmed)
+    details = res.fetchall()
+
+    for count, band_tx, dxcc_country in details:
+        if not dxcc_country in working:
+            working[dxcc_country] = OrderedDict()
+            working[dxcc_country]['160M'] = None
+            working[dxcc_country]['80M'] = None
+            working[dxcc_country]['40M'] = None
+            working[dxcc_country]['30M'] = None
+            working[dxcc_country]['20M'] = None
+            working[dxcc_country]['17M'] = None
+            working[dxcc_country]['15M'] = None
+            working[dxcc_country]['12M'] = None
+            working[dxcc_country]['10M'] = None
+            working[dxcc_country]['6M'] = None
+        if band_tx in working[dxcc_country]:
+            working[dxcc_country][band_tx] = str(count)
+
+    res = cur.execute (dxcc_lotw_confirmed)
+    details = res.fetchall()
+
+    for count, band_tx, dxcc_country in details:
+
+        #print ( dxcc_country, band_tx, working[dxcc_country][band_tx] )
+        working[dxcc_country][band_tx] =  working[dxcc_country][band_tx] + "," + str(count)
+
+    for country in working:
+        for band in working[country]:
+            s = working[country][band]
+            if s is None or s == '':
+                working[country][band] = '-'
+            elif ',' in s:
+                (qso, lotw) = s.split(',')
+                working[country][band] = '%s/%s' % (lotw, qso)
+            else:
+                print (s)
+                working[country][band] = '0/' + s
+
+    #pprint.pprint (working)
+    tab = []
+    for country in working:
+        tabC = [country]
+        for band in working[country]:
+            tabC.append (working[country][band])
+        tab.append (tabC)
+    header = ['Country', '160M', '80M', '40M', '30M', '17M', '15M', '12M', '10M', '6M']
+
+    awards['ARRL']['DXCC']['Table'] = tabulate.tabulate(tab, headers=header)
 
 def doSTATS_QSL ():
     global awards
@@ -334,6 +406,30 @@ def doSTATS_GRIDS ():
     awards['STATS']['STATS_GRIDS']['Grids_Count'] = '32400'
 
 
+def doSTATS_MISSINGDXCCCONFIRM ():
+    global awards
+
+    expr = "select dxcc_country"
+    expr += conditions ['from'] 
+    expr += " dxcc_country not in "
+    expr += "(select DISTINCT dxcc_country "
+    expr += conditions ['from'] 
+    expr += conditions['LoTW']
+    expr += conditions['no_maritime'] + " True) "
+    expr += ' AND ' + conditions['no_maritime'] + " True "
+
+    res = cur.execute (expr)
+
+    awards['STATS']['STATS_MISSINGDXCCCONFIRM'] = {}
+
+    i = 1
+    for k in res:
+        awards['STATS']['STATS_MISSINGDXCCCONFIRM']["%s " % (k[0])] = 'Missing QSL'
+        i += 1
+
+
+
+ 
 
 
 def doSTATS_DXCCBYDATE ():
@@ -350,6 +446,8 @@ def doSTATS_DXCCBYDATE ():
     expr += " AND " + conditions['LoTW']
     expr += conditions['no_maritime'] + " True "
     expr += "order by dxcc_country, qso_done"
+
+    #print (expr)
 
     res = cur.execute (expr)
 
@@ -428,8 +526,8 @@ def doDXCC_BAND(band):
 def doDXCC_MISSINGQSL():
     global awards
 
-    expr = "SELECT distinct dxcc_country FROM qso_table_v007 where " + conditions['no_maritime'] + " True " + "EXCEPT "
-    expr = expr + "SELECT distinct dxcc_country FROM qso_table_v007 where " + conditions['no_maritime'] + conditions['LoTW'] + " True"
+    expr = "SELECT distinct dxcc_country FROM " + qso_table + " where " + conditions['no_maritime'] + " True " + "EXCEPT "
+    expr = expr + "SELECT distinct dxcc_country FROM " + qso_table + " where " + conditions['no_maritime'] + conditions['LoTW'] + " True"
     res = cur.execute (expr)
     output = res.fetchall()
     awards['ARRL']['DXCC']['DXCC_MISSINGQSL'] = {'DXCC': output, 'Count': len(output)}
@@ -438,7 +536,7 @@ def doDXCC_MISSINGQSL():
 def doDXCC_CONFIRMEDCOUNTRYCOUNTS():
     global awards
     
-    expr = 'select distinct count(*) as C, dxcc_country from qso_table_v007 where '
+    expr = 'select distinct count(*) as C, dxcc_country from ' + qso_table + ' where '
     expr = expr + conditions['no_maritime'] + conditions['LoTW'] + ' True '
     expr = expr + 'group by dxcc_country order by c DESC'
     #print (expr)
@@ -490,7 +588,7 @@ def doCQWPX_CONTINENT(continent, mode,count):
     if mode == "DIGITAL":
         co += ' and ' + conditions["DATA"] + ' True '
 
-    expr = "select DISTINCT call, dxcc_id from qso_table_v007 where " + conditions['LoTW'] + co
+    expr = "select DISTINCT call, dxcc_id from " + qso_table + " where " + conditions['LoTW'] + co
     res = cur.execute (expr)
 
     prefixes = []
@@ -525,7 +623,7 @@ def doCQWPX(mode):
                '10M': {}, '6M': {}, '2M': {}, '70CM': {}, '23CM': {}, '3C': {}}
 
     #log.info ("      WPX - Any Mode" )
-    expr = "select DISTINCT call, band_rx, mode from qso_table_v007 where " + conditions['LoTW'] + " True "
+    expr = "select DISTINCT call, band_rx, mode from " + qso_table + " where " + conditions['LoTW'] + " True "
     if mode == 'DIGITAL':
         expr += ' and ' + conditions['DATA'] + ' True'
     res = cur.execute (expr)
@@ -715,6 +813,8 @@ def doAWARDS_DXCC():
 
     doDXCC_MISSINGQSL ()
     doDXCC_CONFIRMEDCOUNTRYCOUNTS ()
+    doGetDXCC_table()
+
 
     awards['ARRL']['DXCC']['Satellite'] = {'Notes': 'ToDo: No Satellite Log Analysis has been done'}
 
@@ -1041,6 +1141,7 @@ def doSTATS():
     doSTATS_BANDS()
     doSTATS_MODES()
     doSTATS_DXCCBYDATE()
+    doSTATS_MISSINGDXCCCONFIRM()
     doSTATS_GRIDS()
 
 
@@ -1071,6 +1172,7 @@ if True:
 if __name__ == "__main__":
 
     pp.pprint (awards)
+    print (awards['ARRL']['DXCC']['Table'])
 
     #pp.pprint (awards['NZART'])
 
