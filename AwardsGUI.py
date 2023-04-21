@@ -26,8 +26,36 @@ import macloggerdx_awards
 hierarchy = macloggerdx_awards.awards
 
 root = Tk()
-root.geometry("900x900")
-tree = ttk.Treeview(root)
+root.title ('AwardsGUI')
+root.geometry("1000x1000")
+
+
+tabControl = ttk.Notebook(root)
+  
+tab1 = ttk.Frame(tabControl)
+tab2 = ttk.Frame(tabControl)
+  
+tabControl.add(tab1, text ='Hierarchy')
+tabControl.add(tab2, text ='DxCC Challenge')
+tabControl.pack(expand = 1, fill ="both")
+
+# ttk.Label(tab1, 
+#           text ="Welcome to \
+#           GeeksForGeeks").grid(column = 0, 
+#                                row = 0,
+#                                padx = 30,
+#                                pady = 30)  
+# ttk.Label(tab2,
+#           text ="Lets dive into the\
+#           world of computers").grid(column = 0,
+#                                     row = 0, 
+#                                     padx = 30,
+#                                     pady = 30)
+
+
+
+
+tree = ttk.Treeview(tab1)
 ttk.Style().configure('Treeview', rowheight=30)
 tree["columns"] = ('one') #("one", "two", 'three')
 tree.column("one")
@@ -88,6 +116,20 @@ def json_tree(tree, parent, dictionary, tag):
 
 json_tree(tree, '', hierarchy, '')
 
+print (hierarchy['ARRL']['DXCC']['Table'])
+
+quote = hierarchy['ARRL']['DXCC']['Table']
+
+S = Scrollbar(tab2)
+T = Text(tab2, width=900)
+T.tag_configure('font', font=('Courier', 11, 'bold'))
+S.pack(side=RIGHT, fill=Y)
+T.pack(side=LEFT, fill=Y)
+S.config(command=T.yview)
+T.config(yscrollcommand=S.set)
+T.insert(END, quote, 'font')
+
+#Text (tab2, , font= ("Courier", 14), )
 
 tree.pack(expand=True, fill='both')
 

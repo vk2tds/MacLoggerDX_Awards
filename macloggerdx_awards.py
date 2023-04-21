@@ -302,7 +302,7 @@ def doGetDXCC_table():
         for band in working[country]:
             tabC.append (working[country][band])
         tab.append (tabC)
-    header = ['Country', '160M', '80M', '40M', '30M', '17M', '15M', '12M', '10M', '6M']
+    header = ['Country', '160M', '80M', '40M', '30M', '20M', '17M', '15M', '12M', '10M', '6M']
 
     awards['ARRL']['DXCC']['Table'] = tabulate.tabulate(tab, headers=header)
 
