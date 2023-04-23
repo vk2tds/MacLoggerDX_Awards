@@ -34,9 +34,12 @@ tabControl = ttk.Notebook(root)
   
 tab1 = ttk.Frame(tabControl)
 tab2 = ttk.Frame(tabControl)
+tab3 = ttk.Frame(tabControl)
   
 tabControl.add(tab1, text ='Hierarchy')
-tabControl.add(tab2, text ='DxCC Challenge')
+tabControl.add(tab2, text ='DXCC Challenge')
+tabControl.add(tab3, text ='DXCC Grid')
+
 tabControl.pack(expand = 1, fill ="both")
 
 # ttk.Label(tab1, 
@@ -85,6 +88,7 @@ def json_tree(tree, parent, dictionary, tag):
     # https://gist.github.com/lukestanley/8525f9fdcb903a43376a35a77575edff
     for key in dictionary:
         uid = uuid.uuid4()
+        #print (key)
         if isinstance(dictionary[key], dict):
             tree.insert(parent, 'end', uid, text=key)
             if 'Contacts' in dictionary[key] and 'Required' in dictionary[key]:
@@ -103,7 +107,7 @@ def json_tree(tree, parent, dictionary, tag):
                 k = dictionary[key]
             json_tree(tree, uid, dictionary[key],'')
         elif isinstance(dictionary[key], list):
-            tree.insert(parent, 'end', uid, text=key + '[]')
+            tree.insert(parent, 'end', uid, text=str(key) + '[]')
             json_tree(tree,
                       uid,
                       dict([(i, x) for i, x in enumerate(dictionary[key])]),
@@ -131,9 +135,30 @@ T.insert(END, quote, 'font')
 
 #Text (tab2, , font= ("Courier", 14), )
 
+r = hierarchy['ARRL']['DXCC']['RawTable']
+
+
+# for x in range(len(r)):
+#     for y in range(len(r[0])):
+#         frameGrid = Frame(
+#             master=tab3,
+#             relief=RAISED,
+#             borderwidth=2
+#             )
+#         frameGrid.grid(row=x, column=y)        
+#         labelGrid = Label(master=frameGrid, text=r[x][y])
+#         labelGrid.pack()
+
+
+
+
+
+
+
 tree.pack(expand=True, fill='both')
 
 #open_children(tree.focus())
 open_top(tree.focus())
 
 root.mainloop()
+print ('Done)')

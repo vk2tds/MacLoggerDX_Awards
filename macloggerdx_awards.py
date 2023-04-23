@@ -259,6 +259,7 @@ def doGetDXCC_table():
     res = cur.execute (dxcc_qso_confirmed)
     details = res.fetchall()
 
+
     for count, band_tx, dxcc_country in details:
         if not dxcc_country in working:
             working[dxcc_country] = OrderedDict()
@@ -302,9 +303,53 @@ def doGetDXCC_table():
         for band in working[country]:
             tabC.append (working[country][band])
         tab.append (tabC)
-    header = ['Country', '160M', '80M', '40M', '30M', '20M', '17M', '15M', '12M', '10M', '6M']
+
+
+    staticCols = ['Country', '160M', '80M', '40M', '30M', '20M', '17M', '15M', '12M', '10M', '6M']
+    challengeQ = 0
+    challengeL = 0
+    sumQ = {}
+    sumL = {}
+    for row in tab:
+        c = 0
+        for line in row:
+            if c != 0:
+                col = staticCols[c]
+                if not col in sumQ:
+                    sumQ[col] = 0
+                if not col in sumL:
+                    sumL[col] = 0
+                if line != '-':
+                    (L,Q) = line.split('/')
+                    if int(L) > 0:
+                        sumL[col] += 1
+                        challengeL += 1
+                    if int(Q) > 0:
+                        sumQ[col] += 1
+                        challengeQ += 1
+
+            c += 1
+
+    header = ['country' + '\r' +  str ( challengeL) + '/' + str(challengeQ)]
+
+    for col in sumQ:
+        h = col + '\r'
+        h += str ( sumL[col]) + '/' + str (sumQ[col])
+        header.append (h)
+
+    
+    #header = ['Country', '160M', '80M', '40M', '30M', '20M', '17M', '15M', '12M', '10M', '6M']
+
 
     awards['ARRL']['DXCC']['Table'] = tabulate.tabulate(tab, headers=header)
+
+    header = [header]
+    for r in tab:
+        header.append (r)
+
+    awards['ARRL']['DXCC']['RawTable'] = header
+
+
 
 def doSTATS_QSL ():
     global awards
@@ -1168,6 +1213,8 @@ if True:
     f=open ("demofile2.xml", "w")
     f.write (parseString(xml).toprettyxml())
     f.close()
+
+#print (awards)
 
 if __name__ == "__main__":
 
