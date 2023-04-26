@@ -293,7 +293,7 @@ def doGetDXCC_table():
                 (qso, lotw) = s.split(',')
                 working[country][band] = '%s/%s' % (lotw, qso)
             else:
-                print (s)
+                #print (s)
                 working[country][band] = '0/' + s
 
     #pprint.pprint (working)
@@ -330,10 +330,66 @@ def doGetDXCC_table():
 
             c += 1
 
-    header = ['country' + '\r' +  str ( challengeL) + '/' + str(challengeQ)]
+    header = ['country' + '\r\n' +  str ( challengeL) + '/' + str(challengeQ)]
+
+    required = []
+    for row in tab:
+        c = 0
+        for line in row:
+            if c != 0:
+                if line != '-':
+                    print (line)
+                    (L,Q) = line.split('/')
+                    if int(L) == 0:
+                        required.append ({'Country': row[0], 'Band': staticCols[c]})             
+            c += 1
+
+
+    for line in required:
+        country = line['Country']
+        band = line['Band']
+        print (country, band)        
+
+        query = "select call, qso_start from "+ qso_table + ' where '
+        query += " not call like '%/MM' "
+        query += "and band_tx = '" + band + "' and dxcc_country = '" + country + "'"
+
+        res = cur.execute (query)
+        details = res.fetchall()
+
+        line['Calls'] = details
+
+    r = 0
+    for row in tab:
+        c = 0
+        for line in row:
+            if c != 0:
+                if line != '-':
+                    print (line)
+                    (L,Q) = line.split('/')
+                    if int(L) == 0:
+                        for ret in required:
+                            if ret['Country'] == row[0] and ret['Band'] == staticCols[c]:
+                                #line = l
+                                for (call,when) in ret['Calls']:
+                                    line = line + '\r\n'
+                                    line = line + call + ',' + str(when) 
+                                    tab[r][c] = line
+
+            c += 1
+        r += 1
+
+
+
+
+
+
+    print (tab)
+
+
 
     for col in sumQ:
-        h = col + '\r'
+        h = col + '\r\n'
         h += str ( sumL[col]) + '/' + str (sumQ[col])
         header.append (h)
 
@@ -348,6 +404,9 @@ def doGetDXCC_table():
         header.append (r)
 
     awards['ARRL']['DXCC']['RawTable'] = header
+    #awards['ARRL']['DXCC']['Required'] = required
+
+ 
 
 
 
@@ -1214,12 +1273,23 @@ if True:
     f.write (parseString(xml).toprettyxml())
     f.close()
 
+
+    table = awards['ARRL']['DXCC']['Table']
+    rawtable = awards['ARRL']['DXCC']['RawTable']
+
+    awards['ARRL']['DXCC'].pop('Table')
+    awards['ARRL']['DXCC'].pop('RawTable')
+
+
+
 #print (awards)
 
 if __name__ == "__main__":
-
-    pp.pprint (awards)
-    print (awards['ARRL']['DXCC']['Table'])
+    True
+    #pp.pprint (awards)
+    
+    
+    # print (awards['ARRL']['DXCC']['Table'])
 
     #pp.pprint (awards['NZART'])
 
