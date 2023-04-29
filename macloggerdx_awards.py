@@ -30,6 +30,7 @@ from dicttoxml import dicttoxml
 from xml.dom.minidom import parseString
 from collections import OrderedDict
 import tabulate
+from dateutil import parser
 
 
 
@@ -338,7 +339,7 @@ def doGetDXCC_table():
         for line in row:
             if c != 0:
                 if line != '-':
-                    print (line)
+                    #print (line)
                     (L,Q) = line.split('/')
                     if int(L) == 0:
                         required.append ({'Country': row[0], 'Band': staticCols[c]})             
@@ -348,7 +349,7 @@ def doGetDXCC_table():
     for line in required:
         country = line['Country']
         band = line['Band']
-        print (country, band)        
+        #print (country, band)        
 
         query = "select call, qso_start from "+ qso_table + ' where '
         query += " not call like '%/MM' "
@@ -359,13 +360,25 @@ def doGetDXCC_table():
 
         line['Calls'] = details
 
+
+    #http://www.hb9bza.net/lotw-users-list
+
+
+    last_lotw = {}
+    file = open ('lotw-user-activity.csv', 'r')
+    for line in file:
+        (call, d,t) = line.split(',')
+        last_lotw[call] = parser.parse ('%sT%s' %(d,t)) 
+    file.close()
+
+
     r = 0
     for row in tab:
         c = 0
         for line in row:
             if c != 0:
                 if line != '-':
-                    print (line)
+                    #print (line)
                     (L,Q) = line.split('/')
                     if int(L) == 0:
                         for ret in required:
@@ -373,7 +386,10 @@ def doGetDXCC_table():
                                 #line = l
                                 for (call,when) in ret['Calls']:
                                     line = line + '\r\n'
-                                    line = line + call + ',' + str(when) 
+                                    line = line + call + ',' + str(when) + ','
+                                    if call in last_lotw:
+                                        print ('Found')
+                                        line = line + str(last_lotw[call])
                                     tab[r][c] = line
 
             c += 1

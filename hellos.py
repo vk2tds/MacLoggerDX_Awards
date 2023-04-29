@@ -15,11 +15,22 @@ from PyQt6.QtGui import QIcon, QAction
 
 from PyQt6.QtWidgets import QMainWindow, QApplication, QPushButton, QWidget, QTabWidget,QVBoxLayout, QTableView, QSizePolicy, QGridLayout
 from PyQt6.QtGui import QIcon, QStandardItemModel, QStandardItem, QFont, QColor
-from PyQt6.QtCore import pyqtSlot
+from PyQt6.QtCore import pyqtSlot, Qt
+from PyQt6 import QtCore
 from collections import OrderedDict
 import uuid
 import pprint 
+from dateutil import parser
+import datetime
 
+
+#from PyQt6.QtWidgets import *
+#from PyQt6.QtGui import *
+#from PyQt6.QtCore import *
+
+
+
+#sudo pip3 install python-dateutil
 
 import macloggerdx_awards
 
@@ -62,24 +73,40 @@ class TableModel(QAbstractTableModel):
             if value == '-':
                 return QColor(COLORS[0])
             if '/' in value:
-                (a,b) = value.split('/')
+                (a,b) = value.split('/',1)
                 if a == '0':
                     return QColor(COLORS[1])
                 return QColor(COLORS[2])
         if role == Qt.ItemDataRole.ToolTipRole:
             value = self._data[index.row()][index.column()]
             if '/' in value:
-                (a,b) = value.split('/')
+                (a,b) = value.split('/',1)
                 if a == '0':
                     ret = ''
                     for line in value.split('\r\n'):
                         if ',' in line:
                             #ret += line + '\r\n'
-                            (call, when) = line.split(',')
-                            (a,b) = when.split('.')
+                            (call, when, lhen) = line.split(',',2)
+                            print (len(when))
+                            (a,b) = when.split('.',1)
                             wint = int(a)
+                            if lhen == '':
+                                lint = 'NEVER'
+                            else:
+                                True
+                                lint = lhen
+                                #lint = int(lhen)
                             dt = datetime.datetime.fromtimestamp(wint)
-                            ret += '%s: %s\r\n' % (str(dt), call)
+                            dtd = datetime.datetime.now() - dt
+                            if dtd.days < 14:
+                                ret += '<div style="color:green;">' + (('%s: %s %s') % (str(dt), call, str(lint))).replace (' ', '&nbsp;') + '</div>\r\n'
+                            elif dtd.days < 28:
+                                ret += '<div style="color:orange;">' + (('%s: %s %s') % (str(dt), call, str(lint))).replace (' ', '&nbsp;') + '</div>\r\n'
+                            elif dtd.days < 90:
+                                ret += '<div style="color:red;">' + (('%s: %s %s') % (str(dt), call, str(lint))).replace (' ', '&nbsp;') + '</div>\r\n'
+                            else:
+                                ret += '<div style="color:black;">' + (('%s: %s %s') % (str(dt), call, str(lint))).replace (' ', '&nbsp;') + '</div>\r\n'
+                            print (ret)
                     return ret
 
     def rowCount(self, index):
@@ -147,6 +174,9 @@ class MyTableWidget(QWidget):
 
         self.table = QTableView()
         self.model = TableModel(newdata)
+        self.model.setHeaderData (1, Qt.Orientation.Horizontal, 'AAA')
+        self.model.setHeaderData (2, Qt.Orientation.Horizontal, 'BBB')
+        self.model.setHeaderData (2, Qt.Orientation.Vertical, 'CCC')
         self.table.setModel(self.model)
         self.table.setParent (self.tab2)
         self.table.resize (1000,800)
@@ -170,6 +200,8 @@ class MyTableWidget(QWidget):
 
         treeView = QTreeView()
         treeView.setHeaderHidden(True)
+
+
 
         treeModel = QStandardItemModel()
         treeModel.setHorizontalHeaderLabels(['Name', 'Details'])
