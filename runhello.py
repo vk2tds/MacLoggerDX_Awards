@@ -62,9 +62,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def refreshButtonClicked (self):
         print ('ButtonStart')
-        macloggerdx_awards.start()
-        hierarchy = macloggerdx_awards.awards
-        rawtable = macloggerdx_awards.rawtable
+        macloggerdx_awards.analysis.start()
+        hierarchy = macloggerdx_awards.analysis.awards
+        rawtable = macloggerdx_awards.analysis.rawtable
         setTreeView (self, hierarchy)
         setTableView(self, rawtable)
         print ('ButtonFinish')        
