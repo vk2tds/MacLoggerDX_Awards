@@ -40,16 +40,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.show()
 
     def autoResize(self):
-        #self.document().setTextWidth(self.viewport().width())
         margins = self.contentsMargins()
-        #height = int(self.document().size().height() + margins.top() + margins.bottom())
         height = self.height()
         width = self.width()
-        #self.setFixedHeight(height)
-        print (height)
 
-        self.tabWidget1.setFixedHeight(height-50)
-        self.tabWidget1.setFixedWidth (width-50)
+        #self.x()
+
+        #self.tabWidget1.setFixedHeight(height- int((margins.top() + margins.bottom())/2))
+        self.tabWidget1.setFixedHeight(height- 50)
+        self.tabWidget1.setFixedWidth (width- 50)
+        
         self.treeView.setFixedHeight(self.tabWidget1.height()-50)
         self.treeView.setFixedWidth (self.tabWidget1.width()-50)
         self.tableView.setFixedHeight(self.tabWidget1.height()-50)
@@ -91,7 +91,7 @@ class StandardItemGreen (QtGui.QStandardItem):
         self.setFont(fnt)
         self.setText(txt)
 class StandardItemOrange (QtGui.QStandardItem):
-    def __init__(self, txt='', font_size=12, set_bold=False, color=QtGui.QColor(0, 255, 0)):
+    def __init__(self, txt='', font_size=12, set_bold=False, color=QtGui.QColor(128, 128, 0)):
         super().__init__()
 
         fnt = QtGui.QFont('Open Sans', font_size)
@@ -104,36 +104,68 @@ class StandardItemOrange (QtGui.QStandardItem):
 
 
 class TableModel(QtCore.QAbstractTableModel):
-    def __init__(self, data):
+    def __init__(self, data, hheaders, vheaders):
         super(TableModel, self).__init__()
         self._data = data
+        self._hheaders = hheaders
+        self._vheaders = vheaders
+        
+
 
     def data(self, index, role):
         if role == QtCore.Qt.ItemDataRole.DisplayRole:
             # See below for the nested-list data structure.
             # .row() indexes into the outer list,
             # .column() indexes into the sub-list
-            return self._data[index.row()][index.column()]
+            value = self._data[index.row()][index.column()]
+            if '/' in value:
+                (l,c,q) = value.split('/',2)
+                return ('%s/%s' %(l,q))
+            else:
+                    return value
         if role == QtCore.Qt.ItemDataRole.BackgroundRole:
             value = self._data[index.row()][index.column()]
             if value == '-':
                 return QtGui.QColor(COLORS[0])
             if '/' in value:
-                (a,b) = value.split('/',1)
-                if a == '0':
-                    return QtGui.QColor(COLORS[1])
+                #print (value)
+                (l,c,q) = value.split('/',2)
+                if int(c) > 0 and int(l) == 0:
+                    #asdfjk
+                    return QtGui.QColor(COLORS[4]) # We only have cards
+                if int(l) == 0: # Check to see if we have OQRS coming. Or cards sent
+                    for qrs in oqrs:
+                        if qrs['Country'] == self._vheaders[index.row()]:
+                            s = self._hheaders[index.column()]
+                            if '\r\n' in s:
+                                s = s[:s.index('\r\n')]
+                            if qrs['Band'] == s:
+                                # if we are OQRS
+                                return QtGui.QColor(COLORS[6])                
+                    for sent in qslsent:
+                        if sent['Country'] == self._vheaders[index.row()]:
+                            s = self._hheaders[index.column()]
+                            if '\r\n' in s:
+                                s = s[:s.index('\r\n')]
+                            if sent['Band'] == s:
+                                # if we are OQRS
+                                return QtGui.QColor(COLORS[7])                
+
+                    return QtGui.QColor(COLORS[1]) # no LOTW Confirmations
                 return QtGui.QColor(COLORS[2])
         if role == QtCore.Qt.ItemDataRole.ToolTipRole:
             value = self._data[index.row()][index.column()]
             if '/' in value:
-                (a,b) = value.split('/',1)
-                if a == '0':
+                (l,c,q) = value.split('/',2)
+                if int(c) > 0: # we have some cards
+                    ret = '<div style="color:green;">Cards: ' + c + '</div>\r\n'
+                    return ret    
+                if l == '0':
                     ret = ''
                     for line in value.split('\r\n'):
                         if ',' in line:
                             #ret += line + '\r\n'
                             (call, when, lhen) = line.split(',',2)
-                            print (len(when))
                             (a,b) = when.split('.',1)
                             wint = int(a)
                             if lhen == '':
@@ -152,7 +184,6 @@ class TableModel(QtCore.QAbstractTableModel):
                                 ret += '<div style="color:red;">' + (('%s: %s %s') % (str(dt), call, str(lint))).replace (' ', '&nbsp;') + '</div>\r\n'
                             else:
                                 ret += '<div style="color:black;">' + (('%s: %s %s') % (str(dt), call, str(lint))).replace (' ', '&nbsp;') + '</div>\r\n'
-                            print (ret)
                     return ret
 
     def rowCount(self, index):
@@ -163,6 +194,17 @@ class TableModel(QtCore.QAbstractTableModel):
         # The following takes the first sub-list, and returns
         # the length (only works if all rows are an equal length)
         return len(self._data[0])
+    
+
+    def headerData(self, section, orientation, role):           # <<<<<<<<<<<<<<< NEW DEF
+        # row and column headers
+        if role == QtCore.Qt.ItemDataRole.DisplayRole:
+            if orientation == QtCore.Qt.Orientation.Horizontal:
+                return self._hheaders[section] 
+            if orientation == QtCore.Qt.Orientation.Vertical:
+                return self._vheaders[section]
+
+        return QtCore.QVariant()
 
 
 
@@ -218,7 +260,7 @@ def json_tree(tree, parent, dictionary, tag):
                 for el in dk:
                     # print ('el', el)
                     if type(el) == dict:
-                        print ('*** DICT ***')
+                        # print ('*** DICT ***')
                         show = True
                         if 'DXCC' in el and 'Count' in el:
                             show = False
@@ -231,12 +273,12 @@ def json_tree(tree, parent, dictionary, tag):
                                 #print ('fm', fm, el[fm])                        
                                 k.appendRow ([QtGui.QStandardItem ('D' + str(fm)),QtGui.QStandardItem (str(el[fm]))] )
                     elif type(el) == tuple:
-                        print ('*** TUPLE ***')
+                        # print ('*** TUPLE ***')
                         for fm in el:
                             #print ('fm', fm)                        
                             k.appendRow (QtGui.QStandardItem (str(fm)) )
                     elif type(el) == list:
-                        print ('*** LIST ***')
+                        # print ('*** LIST ***')
                         for fm in el:
                             k.appendRow ([QtGui.QStandardItem ('L' + str(fm))] )
                     else:
@@ -253,43 +295,75 @@ def json_tree(tree, parent, dictionary, tag):
 
 
 
-def setTableView (tv):
+def setTableView (window):
     #tv.setModel (TableModel)
 
-
+    tv = window.tableView
 
     r = rawtable
 
-    staticCols = ['Country', '160M', '80M', '40M', '30M', '20M', '17M', '15M', '12M', '10M', '6M']
+    staticCols = ['160M', '80M', '40M', '30M', '20M', '17M', '15M', '12M', '10M', '6M']
 
-    newdata = [[0 for x in range(len(staticCols))] for y in range(len(r))] 
+    newdata = [[0 for x in range(len(staticCols))] for y in range(len(r)-1)] 
     v = OrderedDict()
+    hor = []
+    ver = []
     j = 0
+    lotw_confirmed = 0
+    lotw_unconfirmed = 0
+
+
     for row in r:
-        i = 0
         newRow = []
-        for col in row:
-            newdata[j][i] = col
-            if j == 0:
-                v[staticCols[i]] = []
-            c = col
-            if j == 0:
-                if '\r\n' in c:
-                    (a,b) = c.split('\r\n')
-                    c = b
-            v[staticCols[i]].append (c)
-            i += 1
+        if j == 0: # First row only
+            i = 0
+            for col in row:
+                if i != 0: # ignore first column of data
+                    v[staticCols[i-1]] = []
+                    print (col)
+                    if '\r\n' in col:
+                        (a,b) = col.split('\r\n')
+                        if '/' in b:
+                            (l,c,q) = b.split('/',2)
+                            hor.append ('%s\r\n%s/%s' % (a,l,q))
+                        else:
+                            hor.append (col)    
+    
+                    else:
+                        hor.append (col)
+                i += 1
+        else:
+            i = 0
+            for col in row:
+                if i == 0:
+                    ver.append (col)
+                else: 
+                    newdata[j-1][i-1] = col
+                    v[staticCols[i-1]].append (col)
+                    #print ('col', col)
+                    if '\r\n' in col:
+                        #print (col)
+                        (a,b) = col.split('\r\n',1)
+                        lotw_unconfirmed += 1
+                    else:
+                        if col != '-':
+                            lotw_confirmed += 1
+                i += 1
         j += 1
 
     # expand later... https://www.pythonguis.com/tutorials/pyqt6-qtableview-modelviews-numpy-pandas/
 
-    model = TableModel(newdata)
-    model.setHeaderData (1, QtCore.Qt.Orientation.Horizontal, 'AAA')
-    model.setHeaderData (2, QtCore.Qt.Orientation.Horizontal, 'BBB')
-    model.setHeaderData (2, QtCore.Qt.Orientation.Vertical, 'CCC')
+    print ('Confirmed', lotw_confirmed, 'total', lotw_confirmed + lotw_unconfirmed)
+
+    window.tabWidget1.setTabText (1, 'DXCC Status - ' + str(lotw_confirmed) + '/' + str(lotw_confirmed + lotw_unconfirmed))
+
+
+    model = TableModel(newdata, hor, ver)
     tv.setModel(model)
 
-def setTreeView(tv):
+
+def setTreeView(window):
+    tv = window.treeView
     tv.setHeaderHidden(True)
 
     treeModel = QtGui.QStandardItemModel()
@@ -310,8 +384,39 @@ app = QtWidgets.QApplication(sys.argv)
 window = MainWindow()
 
 
-setTreeView (window.treeView)
-setTableView(window.tableView)
+setTreeView (window)
+setTableView(window)
+
+
+oqrs = [ {'Country': 'West Kiribati', 'Band': '40M', 'Call':'T30UN'},
+         {'Country': 'South Cook Islands', 'Band': '20M', 'Call':'E51CIK'},
+         {'Country': 'South Cook Islands', 'Band': '17M', 'Call':'E51WEG'},
+         {'Country': 'South Cook Islands', 'Band': '15M', 'Call':'E51CIK'},
+         {'Country': 'Saint Martin', 'Band': '15M', 'Call':'FS4WBS'},
+         {'Country': 'Niue', 'Band': '30M', 'Call':'E6CI'},
+         {'Country': 'Angola', 'Band': '20M', 'Call':'D2UY'},
+         {'Country': 'Malawi', 'Band': '17M', 'Call':'7Q7EMH'},
+         {'Country': 'Malawi', 'Band': '20M', 'Call':'7Q7EMH'},
+         {'Country': 'East Malaysia', 'Band': '30M', 'Call':'9M8DEN'},
+         {'Country': 'Belarus', 'Band': '30M', 'Call':'EW8W'},
+         {'Country': 'Viet Nam', 'Band': '15M', 'Call':'XV1X'},
+         {'Country': 'India', 'Band': '10M', 'Call':'VU2GRM'},
+         {'Country': 'Fiji', 'Band': '30M', 'Call':'3D2AJT'},
+         {'Country': 'Fiji', 'Band': '12M', 'Call':'3D2AJT'},
+
+]
+
+qslsent = [ {'Country': 'Costa Rica', 'Band': '10M', 'Call':'TI3NEL'},
+            {'Country': 'Moldova' , 'Band': '15M', 'Call':'ER3RE'},
+            {'Country': 'Lithuania' , 'Band': '15M', 'Call':'LY3PW'},
+]
+
+
+
+
+
+
+
 
 
 app.exec()

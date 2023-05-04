@@ -55,8 +55,11 @@ qso_table = 'qso_table_v008'
 
 conditions = {"no_maritime": " not call like '%/MM' and ",
               "LoTW": " qsl_received like '%LoTW%' and ",
+              "Card": " qsl_received like '%CardC%' and ",
               "eQSL": " qsl_received like '%eQSL%' and ",
               "LoTWeQSL": " (qsl_received like '%LoTW%' or qsl_received like '%eQSL%') and ",
+              "LoTWCard": " (qsl_received like '%LoTW%' or qsl_received like '%Card%') and ",
+              "LoTWeQSLCard": " (qsl_received like '%LoTW%' or qsl_received like '%eQSL%' or qsl_received like '%CardC%') and ",
               "startDXCC": " select count (distinct dxcc_country) ",
               "startCQWAZ": " select count ( distinct iif (substr(cq_zone,1,1) == '0', substr(cq_zone,2), cq_zone)) ",
               "startCQWAZ_BAND": " select distinct count(distinct iif (substr(cq_zone,1,1) == '0', substr(cq_zone,2), cq_zone)), mode , band_rx from ( select  count(*) as c, cq_zone, mode, band_rx ",
@@ -246,22 +249,25 @@ def doGetDXCC_table():
 
 
     dxcc_lotw_confirmed = 'select count(call), band_tx, dxcc_country from ' + qso_table + ' where '
+    dxcc_card_confirmed = 'select count(call), band_tx, dxcc_country from ' + qso_table + ' where '
     dxcc_qso_confirmed = 'select count(call), band_tx, dxcc_country from ' + qso_table + ' where '
 
     dxcc_lotw_confirmed += conditions['no_maritime'] + conditions['LoTW'] + ' True '
+    dxcc_card_confirmed += conditions['no_maritime'] + conditions['Card'] + ' not ' + conditions['LoTW'] + ' True '
     dxcc_qso_confirmed += conditions['no_maritime'] + ' True '
 
     dxcc_lotw_confirmed += ' group by dxcc_country, band_tx'
+    dxcc_card_confirmed += ' group by dxcc_country, band_tx'
     dxcc_qso_confirmed += ' group by dxcc_country, band_tx'
 
     awards['ARRL']['DXCC']['Table'] = {}
     working = {}
 
     res = cur.execute (dxcc_qso_confirmed)
-    details = res.fetchall()
+    detailsQ = res.fetchall()
 
 
-    for count, band_tx, dxcc_country in details:
+    for count, band_tx, dxcc_country in detailsQ:
         if not dxcc_country in working:
             working[dxcc_country] = OrderedDict()
             working[dxcc_country]['160M'] = None
@@ -275,15 +281,25 @@ def doGetDXCC_table():
             working[dxcc_country]['10M'] = None
             working[dxcc_country]['6M'] = None
         if band_tx in working[dxcc_country]:
-            working[dxcc_country][band_tx] = str(count)
+            working[dxcc_country][band_tx] = str(count) + ',0,0'
 
     res = cur.execute (dxcc_lotw_confirmed)
-    details = res.fetchall()
+    detailsL = res.fetchall()
+    for count, band_tx, dxcc_country in detailsL:
+        s = working[dxcc_country][band_tx]
+        (qso, lotw, card) = s.split(',')
+        lotw = count
+        working[dxcc_country][band_tx] = str(qso) + ',' + str(lotw)+',' + str(card)
 
-    for count, band_tx, dxcc_country in details:
+    res = cur.execute (dxcc_card_confirmed)
+    detailsC = res.fetchall()
+    for count, band_tx, dxcc_country in detailsC:
+        s = working[dxcc_country][band_tx]
+        (qso, lotw, card) = s.split(',')
+        card = count
+        working[dxcc_country][band_tx] = str(qso) + ',' + str(lotw)+',' + str(card)
 
-        #print ( dxcc_country, band_tx, working[dxcc_country][band_tx] )
-        working[dxcc_country][band_tx] =  working[dxcc_country][band_tx] + "," + str(count)
+
 
     for country in working:
         for band in working[country]:
@@ -291,8 +307,9 @@ def doGetDXCC_table():
             if s is None or s == '':
                 working[country][band] = '-'
             elif ',' in s:
-                (qso, lotw) = s.split(',')
-                working[country][band] = '%s/%s' % (lotw, qso)
+                #print (s)
+                (qso, lotw, card) = s.split(',')
+                working[country][band] = '%s/%s/%s' % (lotw, card, qso)
             else:
                 #print (s)
                 working[country][band] = '0/' + s
@@ -309,7 +326,9 @@ def doGetDXCC_table():
     staticCols = ['Country', '160M', '80M', '40M', '30M', '20M', '17M', '15M', '12M', '10M', '6M']
     challengeQ = 0
     challengeL = 0
+    challengeC = 0
     sumQ = {}
+    sumC = {}
     sumL = {}
     for row in tab:
         c = 0
@@ -320,18 +339,23 @@ def doGetDXCC_table():
                     sumQ[col] = 0
                 if not col in sumL:
                     sumL[col] = 0
+                if not col in sumC:
+                    sumC[col] = 0
                 if line != '-':
-                    (L,Q) = line.split('/')
+                    (L,C,Q) = line.split('/')
                     if int(L) > 0:
                         sumL[col] += 1
                         challengeL += 1
+                    if int(C) > 0:
+                        sumC[col] += 1
+                        challengeC += 1
                     if int(Q) > 0:
                         sumQ[col] += 1
                         challengeQ += 1
 
             c += 1
 
-    header = ['country' + '\r\n' +  str ( challengeL) + '/' + str(challengeQ)]
+    header = ['country' + '\r\n' +  str ( challengeL) + '/' + str(challengeC) + '/' + str(challengeQ)]
 
     required = []
     for row in tab:
@@ -340,8 +364,8 @@ def doGetDXCC_table():
             if c != 0:
                 if line != '-':
                     #print (line)
-                    (L,Q) = line.split('/')
-                    if int(L) == 0:
+                    (L,C,Q) = line.split('/')
+                    if int(L) == 0 and int(C) == 0:
                         required.append ({'Country': row[0], 'Band': staticCols[c]})             
             c += 1
 
@@ -379,8 +403,8 @@ def doGetDXCC_table():
             if c != 0:
                 if line != '-':
                     #print (line)
-                    (L,Q) = line.split('/')
-                    if int(L) == 0:
+                    (L,C,Q) = line.split('/')
+                    if int(L) == 0 and int(C) == 0:
                         for ret in required:
                             if ret['Country'] == row[0] and ret['Band'] == staticCols[c]:
                                 #line = l
@@ -388,7 +412,7 @@ def doGetDXCC_table():
                                     line = line + '\r\n'
                                     line = line + call + ',' + str(when) + ','
                                     if call in last_lotw:
-                                        print ('Found')
+                                        #print ('Found')
                                         line = line + str(last_lotw[call])
                                     tab[r][c] = line
 
@@ -400,13 +424,13 @@ def doGetDXCC_table():
 
 
 
-    print (tab)
+    #print (tab)
 
 
 
     for col in sumQ:
         h = col + '\r\n'
-        h += str ( sumL[col]) + '/' + str (sumQ[col])
+        h += str ( sumL[col]) + '/' + str(sumQ[col]) + '/' + str (sumQ[col])
         header.append (h)
 
     
@@ -447,17 +471,24 @@ def doSTATS_QSL ():
     expr += conditions['no_maritime'] + " True), "
 
     expr += "D as "
+    expr += "(select  count(call) as COUNT_CARD "
+    expr += conditions['from']
+    expr += conditions['Card']
+    expr += conditions['no_maritime'] + " True), "
+
+
+    expr += "E as "
     expr += "(select count(call) as COUNT_LOTWEQSL " 
     expr += conditions['from']
     expr += conditions['LoTWeQSL']
     expr += conditions['no_maritime'] + " True) "
-    expr += " select * from A, B, C, D"
+    expr += " select * from A, B, C, D, E"
 
     res = cur.execute (expr)
     details = res.fetchone()
 
 
-    awards['STATS']['STATS_QSL'] = {'Total': details[0], 'LoTW_Total': details[1], 'eQSL_Total': details[2], 'LoTWeQSL_Total': details[3],
+    awards['STATS']['STATS_QSL'] = {'Total': details[0], 'LoTW_Total': details[1], 'eQSL_Total': details[2], 'Card_Total': details[3], 'LoTWeQSL_Total': details[4],
                                     'Notes': ' Any mode, no Maritime'}
 
 
@@ -534,7 +565,7 @@ def doSTATS_MISSINGDXCCCONFIRM ():
     expr += " dxcc_country not in "
     expr += "(select DISTINCT dxcc_country "
     expr += conditions ['from'] 
-    expr += conditions['LoTW']
+    expr += conditions['LoTWCard']
     expr += conditions['no_maritime'] + " True) "
     expr += ' AND ' + conditions['no_maritime'] + " True "
 
@@ -561,7 +592,7 @@ def doSTATS_DXCCBYDATE ():
     expr += " dxcc_country in "
     expr += "(select DISTINCT dxcc_country "
     expr += conditions ['from'] 
-    expr += conditions['LoTW']
+    expr += conditions['LoTWCard']
     expr += conditions['no_maritime'] + " True) "
     expr += " AND " + conditions['LoTW']
     expr += conditions['no_maritime'] + " True "
@@ -591,7 +622,7 @@ def doSTATS_DXCCBYDATE ():
 def doCQWAZ_MIXED ():
     global awards
 
-    expr = conditions['startCQWAZ'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTWeQSL'] + "cq_zone != '' and cq_zone != '1-5' and " + conditions['end']
+    expr = conditions['startCQWAZ'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTWeQSLCard'] + "cq_zone != '' and cq_zone != '1-5' and " + conditions['end']
     res = cur.execute (expr)
     awards['CQ']['CQWAZ']['CQWAZ_MIXED'] = {'Contacts':res.fetchone()[0], 'Required':40}
 
@@ -599,7 +630,7 @@ def doCQWAZ_MIXED ():
 def doCQWAZ_BAND(band):
     global awards
 
-    expr = conditions['startCQWAZ_BAND'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTWeQSL'] + " band_rx = '" + band + "' and " + "cq_zone != '' and cq_zone != '1-5' and " + conditions['end'] + conditions['stopCQWAZ_BAND']
+    expr = conditions['startCQWAZ_BAND'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTWeQSLCard'] + " band_rx = '" + band + "' and " + "cq_zone != '' and cq_zone != '1-5' and " + conditions['end'] + conditions['stopCQWAZ_BAND']
     res = cur.execute (expr)
     w = res.fetchall()
     x = []
@@ -610,21 +641,21 @@ def doCQWAZ_BAND(band):
 def doCQWAZ(band):
     global awards
 
-    expr = conditions['startCQWAZ'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTWeQSL'] + " band_rx = '" + band + "' and " + "cq_zone != '' and cq_zone != '1-5' and " + conditions['end']
+    expr = conditions['startCQWAZ'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTWeQSLCard'] + " band_rx = '" + band + "' and " + "cq_zone != '' and cq_zone != '1-5' and " + conditions['end']
     res = cur.execute (expr)
     awards['CQ']['CQWAZ']['CQWAZ_' + band] = {'Contacts':res.fetchone()[0], 'Required':40}
 
 def doCQWAZ_MODE (mode):
     global awards
 
-    expr = conditions['startCQWAZ'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTWeQSL'] + conditions[mode] + "cq_zone != '' and cq_zone != '1-5' and " + conditions['end']
+    expr = conditions['startCQWAZ'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTWeQSLCard'] + conditions[mode] + "cq_zone != '' and cq_zone != '1-5' and " + conditions['end']
     res = cur.execute (expr)
     awards['CQ']['CQWAZ']['CQWAZ_' + mode] = {'Contacts':res.fetchone()[0], 'Required':40}
 
 def doDXCC_MIXED():
     global awards
 
-    expr = conditions['startDXCC'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTW'] + conditions['end']
+    expr = conditions['startDXCC'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTWCard'] + conditions['end']
     res = cur.execute (expr)
     awards['ARRL']['DXCC']['DXCC_MIXED'] = {'Contacts':res.fetchone()[0], 'Required':100}
 
@@ -632,14 +663,14 @@ def doDXCC_MIXED():
 def doDXCC_MODE(mode):
     global awards
 
-    expr = conditions['startDXCC'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTW'] + conditions[mode] + conditions['end']
+    expr = conditions['startDXCC'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTWCard'] + conditions[mode] + conditions['end']
     res = cur.execute (expr)
     awards['ARRL']['DXCC']['DXCC_' + mode] = {'Contacts':res.fetchone()[0], 'Required':100}
 
 def doDXCC_BAND(band):
     global awards
 
-    expr = conditions['startDXCC'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTW'] +  " band_rx = '" + band + "' and " + conditions['end']
+    expr = conditions['startDXCC'] + conditions['from'] + conditions['no_maritime'] + conditions['LoTWCard'] +  " band_rx = '" + band + "' and " + conditions['end']
     res = cur.execute (expr)
     awards['ARRL']['DXCC'][band] = {'Contacts':res.fetchone()[0], 'Required':100}
 
@@ -647,7 +678,7 @@ def doDXCC_MISSINGQSL():
     global awards
 
     expr = "SELECT distinct dxcc_country FROM " + qso_table + " where " + conditions['no_maritime'] + " True " + "EXCEPT "
-    expr = expr + "SELECT distinct dxcc_country FROM " + qso_table + " where " + conditions['no_maritime'] + conditions['LoTW'] + " True"
+    expr = expr + "SELECT distinct dxcc_country FROM " + qso_table + " where " + conditions['no_maritime'] + conditions['LoTWCard'] + " True"
     res = cur.execute (expr)
     output = res.fetchall()
     awards['ARRL']['DXCC']['DXCC_MISSINGQSL'] = {'DXCC': output, 'Count': len(output)}
@@ -657,7 +688,7 @@ def doDXCC_CONFIRMEDCOUNTRYCOUNTS():
     global awards
     
     expr = 'select distinct count(*) as C, dxcc_country from ' + qso_table + ' where '
-    expr = expr + conditions['no_maritime'] + conditions['LoTW'] + ' True '
+    expr = expr + conditions['no_maritime'] + conditions['LoTWCard'] + ' True '
     expr = expr + 'group by dxcc_country order by c DESC'
     #print (expr)
     
@@ -708,7 +739,7 @@ def doCQWPX_CONTINENT(continent, mode,count):
     if mode == "DIGITAL":
         co += ' and ' + conditions["DATA"] + ' True '
 
-    expr = "select DISTINCT call, dxcc_id from " + qso_table + " where " + conditions['LoTW'] + co
+    expr = "select DISTINCT call, dxcc_id from " + qso_table + " where " + conditions['LoTWCard'] + co
     res = cur.execute (expr)
 
     prefixes = []
@@ -743,7 +774,7 @@ def doCQWPX(mode):
                '10M': {}, '6M': {}, '2M': {}, '70CM': {}, '23CM': {}, '3C': {}}
 
     #log.info ("      WPX - Any Mode" )
-    expr = "select DISTINCT call, band_rx, mode from " + qso_table + " where " + conditions['LoTW'] + " True "
+    expr = "select DISTINCT call, band_rx, mode from " + qso_table + " where " + conditions['LoTWCard'] + " True "
     if mode == 'DIGITAL':
         expr += ' and ' + conditions['DATA'] + ' True'
     res = cur.execute (expr)
@@ -1080,14 +1111,14 @@ def doWIA_WORKEDALLVK ():
         expr += '(select count( distinct call) '
         expr += conditions['from']
         expr += 'call like "%s%%" and ' % (area)
-        expr += conditions['LoTW']
+        expr += conditions['LoTWCard']
         expr += conditions['no_maritime'] + " True), \n"
 
         expr += '%sB as' % (area)
         expr += '(select count( distinct dxcc_country) '
         expr += conditions['from']
         expr += 'call like "%s%%" and ' % (area)
-        expr += conditions['LoTW']
+        expr += conditions['LoTWCard']
         expr += conditions['no_maritime'] + " True), \n"
 
         select += '%sC, %sB, ' % (area, area)
@@ -1098,14 +1129,14 @@ def doWIA_WORKEDALLVK ():
         expr += '(select count( distinct call) '
         expr += conditions['from']
         expr += 'call like "%s%%" and ' % (area)
-        expr += conditions['LoTW']
+        expr += conditions['LoTWCard']
         expr += conditions['no_maritime'] + " True), \n"
 
         expr += '%sB as' % (area)
         expr += '(select count( distinct band_tx) '
         expr += conditions['from']
         expr += 'call like "%s%%" and ' % (area)
-        expr += conditions['LoTW']
+        expr += conditions['LoTWCard']
         expr += conditions['no_maritime'] + " True), \n"
 
         select += '%sC, %sB, ' % (area, area)
@@ -1116,14 +1147,14 @@ def doWIA_WORKEDALLVK ():
         expr += '(select count( distinct call) '
         expr += conditions['from']
         expr += 'call like "%s%%" and ' % (area)
-        expr += conditions['LoTW']
+        expr += conditions['LoTWCard']
         expr += conditions['no_maritime'] + " True), \n"
 
         expr += '%sB as' % (area)
         expr += '(select count( distinct dxcc_country) '
         expr += conditions['from']
         expr += 'call like "%s%%" and ' % (area)
-        expr += conditions['LoTW']
+        expr += conditions['LoTWCard']
         expr += conditions['no_maritime'] + " True), \n"
 
         select += '%sC, %sB, ' % (area, area)
@@ -1176,7 +1207,7 @@ def doWIA_GRID():
     global awards
 
 
-    expr = 'select count(distinct  substr(grid,1,4)) ' + conditions['from'] + conditions['no_maritime'] + conditions['LoTW'] +  ' grid is not NULL'
+    expr = 'select count(distinct  substr(grid,1,4)) ' + conditions['from'] + conditions['no_maritime'] + conditions['LoTWCard'] +  ' grid is not NULL'
     res = cur.execute (expr)
     awards['WIA']['GRID']['Contacts'] = res.fetchone()[0]
     awards['WIA']['GRID']['Required'] = 100 
@@ -1204,7 +1235,7 @@ def doRSGB_COMMONWEALTHCENTURY():
         co += " dxcc_id = " + str(code) + " or "
     co += "false) "
 
-    expr = 'select distinct call, dxcc_id, dxcc_country, band_rx  ' + conditions['from'] + co + ' and ' + conditions['LoTWeQSL'] + ' true '
+    expr = 'select distinct call, dxcc_id, dxcc_country, band_rx  ' + conditions['from'] + co + ' and ' + conditions['LoTWeQSLCard'] + ' true '
     res = cur.execute (expr)
     details = res.fetchall()
 
