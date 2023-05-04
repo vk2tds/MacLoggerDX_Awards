@@ -51,26 +51,30 @@ pp = pprint.PrettyPrinter(indent=4)
 
 
 
-qso_table = 'qso_table_v008'
 
-conditions = {"no_maritime": " not call like '%/MM' and ",
-              "LoTW": " qsl_received like '%LoTW%' and ",
-              "Card": " qsl_received like '%CardC%' and ",
-              "eQSL": " qsl_received like '%eQSL%' and ",
-              "LoTWeQSL": " (qsl_received like '%LoTW%' or qsl_received like '%eQSL%') and ",
-              "LoTWCard": " (qsl_received like '%LoTW%' or qsl_received like '%Card%') and ",
-              "LoTWeQSLCard": " (qsl_received like '%LoTW%' or qsl_received like '%eQSL%' or qsl_received like '%CardC%') and ",
-              "startDXCC": " select count (distinct dxcc_country) ",
-              "startCQWAZ": " select count ( distinct iif (substr(cq_zone,1,1) == '0', substr(cq_zone,2), cq_zone)) ",
-              "startCQWAZ_BAND": " select distinct count(distinct iif (substr(cq_zone,1,1) == '0', substr(cq_zone,2), cq_zone)), mode , band_rx from ( select  count(*) as c, cq_zone, mode, band_rx ",
-              "stopCQWAZ_BAND": " group by  cq_zone, mode, band_rx ) group by mode, band_rx ",
-              "WAS": " (dxcc_id = 291 or dxcc_id = 6 or dxcc_id = 110) and ",
-              "from": " from " + qso_table + " where ",
-              "end": " True "}
 
-#select distinct state, band_rx, mode from qso_table_v008 
-#where (dxcc_id = 291 or dxcc_id = 6 or dxcc_id = 110) 
-#group by band_rx, mode, state
+
+
+class analysis():
+    def __init__(self):
+    
+        self.qso_table = 'qso_table_v008'
+
+        self.conditions = {"no_maritime": " not call like '%/MM' and ",
+                    "LoTW": " qsl_received like '%LoTW%' and ",
+                    "Card": " qsl_received like '%CardC%' and ",
+                    "eQSL": " qsl_received like '%eQSL%' and ",
+                    "LoTWeQSL": " (qsl_received like '%LoTW%' or qsl_received like '%eQSL%') and ",
+                    "LoTWCard": " (qsl_received like '%LoTW%' or qsl_received like '%Card%') and ",
+                    "LoTWeQSLCard": " (qsl_received like '%LoTW%' or qsl_received like '%eQSL%' or qsl_received like '%CardC%') and ",
+                    "startDXCC": " select count (distinct dxcc_country) ",
+                    "startCQWAZ": " select count ( distinct iif (substr(cq_zone,1,1) == '0', substr(cq_zone,2), cq_zone)) ",
+                    "startCQWAZ_BAND": " select distinct count(distinct iif (substr(cq_zone,1,1) == '0', substr(cq_zone,2), cq_zone)), mode , band_rx from ( select  count(*) as c, cq_zone, mode, band_rx ",
+                    "stopCQWAZ_BAND": " group by  cq_zone, mode, band_rx ) group by mode, band_rx ",
+                    "WAS": " (dxcc_id = 291 or dxcc_id = 6 or dxcc_id = 110) and ",
+                    "from": " from " + qso_table + " where ",
+                    "end": " True "}
+
 
 
 
@@ -729,6 +733,7 @@ def doCQWPX_CONTINENT(continent, mode,count):
     # https://cq-amateur-radio.com/cq_awards/cq_wpx_awards/cq-wpx-award-rules-022017.pdf
     global awards
     global cur
+    global continents
 
     co = "("
     for code in continents:
@@ -1297,9 +1302,10 @@ def doSTATS():
 
 
 
-
-
-if True:
+def start():
+    global continents
+    global table
+    global rawtable
     doINIT()
     doDatabase()
     doINIT_Awards()
@@ -1332,7 +1338,7 @@ if True:
 #print (awards)
 
 if __name__ == "__main__":
-    True
+    start()
     #pp.pprint (awards)
     
     

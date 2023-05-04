@@ -29,8 +29,6 @@ import datetime
 
 # http://colorbrewer2.org/#type=diverging&scheme=RdBu&n=11
 COLORS = ['#e0e0e0', '#f1b6da', '#b8e186', '#92c5de', '#d1e5f0', '#f7f7f7', '#fddbc7', '#f4a582', '#d6604d', '#b2182b', '#67001f']
-hierarchy = macloggerdx_awards.awards
-rawtable = macloggerdx_awards.rawtable
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -38,6 +36,10 @@ class MainWindow(QtWidgets.QMainWindow):
         super().__init__(*args, **kwargs)
         window = uic.loadUi("MainWindow.ui", self)
         self.show()
+
+        self.refreshButtonClicked()
+
+
 
     def autoResize(self):
         margins = self.contentsMargins()
@@ -54,6 +56,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self.treeView.setFixedWidth (self.tabWidget1.width()-50)
         self.tableView.setFixedHeight(self.tabWidget1.height()-50)
         self.tableView.setFixedWidth (self.tabWidget1.width()-50)
+
+        self.refreshButton.clicked.connect (self.refreshButtonClicked)
+
+
+    def refreshButtonClicked (self):
+        print ('ButtonStart')
+        macloggerdx_awards.start()
+        hierarchy = macloggerdx_awards.awards
+        rawtable = macloggerdx_awards.rawtable
+        setTreeView (self, hierarchy)
+        setTableView(self, rawtable)
+        print ('ButtonFinish')        
+
+
 
     def resizeEvent(self, event):
         self.autoResize()
@@ -295,10 +311,11 @@ def json_tree(tree, parent, dictionary, tag):
 
 
 
-def setTableView (window):
+def setTableView (window, rawtable):
     #tv.setModel (TableModel)
 
     tv = window.tableView
+    tv.setModel (None)
 
     r = rawtable
 
@@ -362,8 +379,10 @@ def setTableView (window):
     tv.setModel(model)
 
 
-def setTreeView(window):
+def setTreeView(window, hierarchy):
     tv = window.treeView
+
+    tv.setModel(None)
     tv.setHeaderHidden(True)
 
     treeModel = QtGui.QStandardItemModel()
@@ -380,12 +399,15 @@ def setTreeView(window):
     tv.resizeColumnToContents(0)
 
 
+
+
+
+
+
 app = QtWidgets.QApplication(sys.argv)
 window = MainWindow()
 
 
-setTreeView (window)
-setTableView(window)
 
 
 oqrs = [ {'Country': 'West Kiribati', 'Band': '40M', 'Call':'T30UN'},
@@ -410,6 +432,8 @@ qslsent = [ {'Country': 'Costa Rica', 'Band': '10M', 'Call':'TI3NEL'},
             {'Country': 'Moldova' , 'Band': '15M', 'Call':'ER3RE'},
             {'Country': 'Lithuania' , 'Band': '15M', 'Call':'LY3PW'},
 ]
+
+#displayAll(oqrs, qslsent)
 
 
 
