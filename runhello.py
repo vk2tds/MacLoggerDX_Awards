@@ -36,6 +36,7 @@ class MainWindow(QtWidgets.QMainWindow):
         super().__init__(*args, **kwargs)
         window = uic.loadUi("MainWindow.ui", self)
         self.show()
+        self.refreshButton.clicked.connect (self.refreshButtonClicked)
 
         self.refreshButtonClicked()
 
@@ -54,20 +55,22 @@ class MainWindow(QtWidgets.QMainWindow):
         
         self.treeView.setFixedHeight(self.tabWidget1.height()-50)
         self.treeView.setFixedWidth (self.tabWidget1.width()-50)
-        self.tableView.setFixedHeight(self.tabWidget1.height()-50)
+        self.tableView.setFixedHeight(self.tabWidget1.height()-200)
         self.tableView.setFixedWidth (self.tabWidget1.width()-50)
 
-        self.refreshButton.clicked.connect (self.refreshButtonClicked)
+        self.tableViewLegend.setFixedWidth (self.tabWidget1.width()-50)
+        self.tableViewLegend.setFixedHeight(50)
 
 
     def refreshButtonClicked (self):
-        print ('ButtonStart')
+        #print ('ButtonStart')
         macloggerdx_awards.analysis.start()
         hierarchy = macloggerdx_awards.analysis.awards
         rawtable = macloggerdx_awards.analysis.rawtable
         setTreeView (self, hierarchy)
         setTableView(self, rawtable)
-        print ('ButtonFinish')        
+        setTableViewLegend(self)
+        #print ('ButtonFinish')        
 
 
 
@@ -125,8 +128,6 @@ class TableModel(QtCore.QAbstractTableModel):
         self._data = data
         self._hheaders = hheaders
         self._vheaders = vheaders
-        
-
 
     def data(self, index, role):
         if role == QtCore.Qt.ItemDataRole.DisplayRole:
@@ -158,6 +159,23 @@ class TableModel(QtCore.QAbstractTableModel):
                             if qrs['Band'] == s:
                                 # if we are OQRS
                                 return QtGui.QColor(COLORS[6])                
+                    for qrs in tosendoqrs:
+                        if qrs['Country'] == self._vheaders[index.row()]:
+                            s = self._hheaders[index.column()]
+                            if '\r\n' in s:
+                                s = s[:s.index('\r\n')]
+                            if qrs['Band'] == s:
+                                # if we are OQRS
+                                return QtGui.QColor(COLORS[8])                
+                    for qts in qsltosend:
+                        if qts['Country'] == self._vheaders[index.row()]:
+                            s = self._hheaders[index.column()]
+                            if '\r\n' in s:
+                                s = s[:s.index('\r\n')]
+                            if qts['Band'] == s:
+                                # if we are OQRS
+                                return QtGui.QColor(COLORS[3])                
+
                     for sent in qslsent:
                         if sent['Country'] == self._vheaders[index.row()]:
                             s = self._hheaders[index.column()]
@@ -221,6 +239,48 @@ class TableModel(QtCore.QAbstractTableModel):
                 return self._vheaders[section]
 
         return QtCore.QVariant()
+
+
+class TableModelLegend(QtCore.QAbstractTableModel):
+    def __init__(self, data):
+        super(TableModelLegend, self).__init__()
+        self._data = data
+        
+
+
+    def data(self, index, role):
+        if role == QtCore.Qt.ItemDataRole.DisplayRole:
+            # See below for the nested-list data structure.
+            # .row() indexes into the outer list,
+            # .column() indexes into the sub-list
+            value = self._data[index.row()][index.column()]
+            return value
+        if role == QtCore.Qt.ItemDataRole.BackgroundRole:
+            #value = self._data[index.row()][index.column()]
+            return QtGui.QColor(COLORS[index.column()])
+            
+        if role == QtCore.Qt.ItemDataRole.ToolTipRole:
+            value = self._data[index.row()][index.column()]
+
+    def rowCount(self, index):
+        # The length of the outer list.
+        return len(self._data)
+
+    def columnCount(self, index):
+        # The following takes the first sub-list, and returns
+        # the length (only works if all rows are an equal length)
+        return len(self._data[0])
+    
+
+    # def headerData(self, section, orientation, role):           # <<<<<<<<<<<<<<< NEW DEF
+    #     # row and column headers
+    #     if role == QtCore.Qt.ItemDataRole.DisplayRole:
+    #         if orientation == QtCore.Qt.Orientation.Horizontal:
+    #             return self._hheaders[section] 
+    #         if orientation == QtCore.Qt.Orientation.Vertical:
+    #             return self._vheaders[section]
+
+    #     return QtCore.QVariant()
 
 
 
@@ -309,8 +369,6 @@ def json_tree(tree, parent, dictionary, tag):
                 if not key in ('Contacts', 'Required', 'Fields', 'Fields_Count', 'Grids', 'Grids_Count'):
                     parent.appendRow ([QtGui.QStandardItem ('P' + str(key)),QtGui.QStandardItem (str(dictionary[key]))] )
 
-
-
 def setTableView (window, rawtable):
     #tv.setModel (TableModel)
 
@@ -337,7 +395,6 @@ def setTableView (window, rawtable):
             for col in row:
                 if i != 0: # ignore first column of data
                     v[staticCols[i-1]] = []
-                    print (col)
                     if '\r\n' in col:
                         (a,b) = col.split('\r\n')
                         if '/' in b:
@@ -357,9 +414,7 @@ def setTableView (window, rawtable):
                 else: 
                     newdata[j-1][i-1] = col
                     v[staticCols[i-1]].append (col)
-                    #print ('col', col)
                     if '\r\n' in col:
-                        #print (col)
                         (a,b) = col.split('\r\n',1)
                         lotw_unconfirmed += 1
                     else:
@@ -370,12 +425,26 @@ def setTableView (window, rawtable):
 
     # expand later... https://www.pythonguis.com/tutorials/pyqt6-qtableview-modelviews-numpy-pandas/
 
-    print ('Confirmed', lotw_confirmed, 'total', lotw_confirmed + lotw_unconfirmed)
+    #print ('Confirmed', lotw_confirmed, 'total', lotw_confirmed + lotw_unconfirmed)
 
     window.tabWidget1.setTabText (1, 'DXCC Status - ' + str(lotw_confirmed) + '/' + str(lotw_confirmed + lotw_unconfirmed))
 
 
     model = TableModel(newdata, hor, ver)
+    tv.setModel(model)
+
+
+def setTableViewLegend (window):
+    #tv.setModel (TableModel)
+
+    tv = window.tableViewLegend
+    tv.setModel (None)
+
+    staticCols = ['Blank', 'No QSL', 'LoTW', 'QSL to Send', 'QSL Card', '17M', 'OQRS', 'QSL Sent', 'ToDo OQRS', '6M']
+
+    newdata = [[staticCols[x] for x in range(len(staticCols))] for y in range(1)] 
+
+    model = TableModelLegend(newdata)
     tv.setModel(model)
 
 
@@ -407,31 +476,54 @@ def setTreeView(window, hierarchy):
 app = QtWidgets.QApplication(sys.argv)
 window = MainWindow()
 
-
-
-
-oqrs = [ {'Country': 'West Kiribati', 'Band': '40M', 'Call':'T30UN'},
-         {'Country': 'South Cook Islands', 'Band': '20M', 'Call':'E51CIK'},
-         {'Country': 'South Cook Islands', 'Band': '17M', 'Call':'E51WEG'},
-         {'Country': 'South Cook Islands', 'Band': '15M', 'Call':'E51CIK'},
-         {'Country': 'Saint Martin', 'Band': '15M', 'Call':'FS4WBS'},
-         {'Country': 'Niue', 'Band': '30M', 'Call':'E6CI'},
+tosendoqrs = [        
          {'Country': 'Angola', 'Band': '20M', 'Call':'D2UY'},
+         {'Country': 'Angola', 'Band': '17M', 'Call':'D2UY'},
+         {'Country': 'Angola', 'Band': '12M', 'Call':'D2UY'},
+         {'Country': 'Viet Nam', 'Band': '10M', 'Call':'XV1X'},
+         {'Country': 'Cetuna', 'Band': '15M', 'Call':'EA9PD'},
+         {'Country': 'Malawi', 'Band': '15M', 'Call':'7Q7EMH'},
+         {'Country': 'Micronesia', 'Band': '15M', 'Call':'V63WJR'}, # Anything september
+
+]
+
+
+oqrs = [ {'Country': 'South Cook Islands', 'Band': '20M', 'Call':'E51CIK'},
+         {'Country': 'South Cook Islands', 'Band': '17M', 'Call':'E51WEG'},
          {'Country': 'Malawi', 'Band': '17M', 'Call':'7Q7EMH'},
          {'Country': 'Malawi', 'Band': '20M', 'Call':'7Q7EMH'},
          {'Country': 'East Malaysia', 'Band': '30M', 'Call':'9M8DEN'},
          {'Country': 'Belarus', 'Band': '30M', 'Call':'EW8W'},
          {'Country': 'Viet Nam', 'Band': '15M', 'Call':'XV1X'},
          {'Country': 'India', 'Band': '10M', 'Call':'VU2GRM'},
-         {'Country': 'Fiji', 'Band': '30M', 'Call':'3D2AJT'},
-         {'Country': 'Fiji', 'Band': '12M', 'Call':'3D2AJT'},
-
+         {'Country': 'Viet Nam', 'Band': '30M', 'Call':'3W1T'},
 ]
 
-qslsent = [ {'Country': 'Costa Rica', 'Band': '10M', 'Call':'TI3NEL'},
-            {'Country': 'Moldova' , 'Band': '15M', 'Call':'ER3RE'},
-            {'Country': 'Lithuania' , 'Band': '15M', 'Call':'LY3PW'},
+qslsent = [ {'Country': 'Costa Rica', 'Band': '10M', 'Call':'TI3NEL', 'When': 'A$5 April 2023'},
+            {'Country': 'Moldova' , 'Band': '15M', 'Call':'ER3RE', 'When': 'A$5 April 2023'},
+            {'Country': 'Lithuania' , 'Band': '15M', 'Call':'LY3PW', 'When': 'A$5 April 2023'},
+            {'Country': 'Czech Republic' , 'Band': '15M', 'Call':'OK1DBE', 'When': '8 May 2023'},
 ]
+
+qsltosend = [ {'Country': 'Malta', 'Band': '17M', 'Call':'9H1ET', 'Comments': 'x2'},
+              {'Country': 'Solomon Islands', 'Band': '40M', 'Call':'H44MS', 'Comments': ''},
+              {'Country': 'Gibraltar', 'Band': '15M', 'Call':'ZB2R', 'Comments': ''},  
+              {'Country': 'Venezuela', 'Band': '10M', 'Call':'YV5DR', 'Comments': ''},  
+              {'Country': 'Crete', 'Band': '15M', 'Call':'SV9MBH', 'Comments': ''},  
+              {'Country': 'Guam', 'Band': '40M', 'Call':'KG6JDX', 'Comments': ''},  
+              {'Country': 'Guam', 'Band': '12M', 'Call':'KG6JDX', 'Comments': ''},  
+              {'Country': 'Luxemburg', 'Band': '30M', 'Call':'LX1JH', 'Comments': ''},  
+              {'Country': 'Latvia', 'Band': '12M', 'Call':'YL3CW', 'Comments': ''},  
+              {'Country': 'Cyprus', 'Band': '15M', 'Call':'5B4AJG', 'Comments': ''},  
+              {'Country': 'Argentina', 'Band': '12M', 'Call':'LU6XQB', 'Comments': 'OQRS Free but via bearu'},  
+              {'Country': 'Azores', 'Band': '17M', 'Call':'CU7AA', 'Comments': ''}, 
+              {'Country': 'Balearic Islands', 'Band': '17M', 'Call':'EA6SA', 'Comments': ''}, 
+              {'Country': 'Balearic Islands', 'Band': '30M', 'Call':'EA6TH', 'Comments': ''}, 
+              {'Country': 'Belarus', 'Band': '17M', 'Call':'EU1FQ', 'Comments': ''}, 
+
+            ]
+
+
 
 #displayAll(oqrs, qslsent)
 

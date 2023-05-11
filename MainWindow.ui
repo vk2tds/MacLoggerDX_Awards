@@ -64,7 +64,7 @@
       <string>DXCC Status</string>
      </attribute>
      <layout class="QFormLayout" name="formLayout">
-      <item row="0" column="0">
+      <item row="1" column="0">
        <widget class="QTableView" name="tableView">
         <property name="sizePolicy">
          <sizepolicy hsizetype="Expanding" vsizetype="Minimum">
@@ -79,6 +79,9 @@
          </size>
         </property>
        </widget>
+      </item>
+      <item row="0" column="0">
+       <widget class="QTableView" name="tableViewLegend"/>
       </item>
      </layout>
     </widget>

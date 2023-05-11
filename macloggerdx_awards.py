@@ -16,6 +16,9 @@
 # band_tx == 20M
 #/usr/libexec/PlistBuddy ~/Documents/MLDX_Logs/mode_mapping.plist 
 
+
+#python3 -m pip install -U numpy
+
 import sqlite3
 import logging
 import logging.handlers
@@ -31,6 +34,7 @@ from xml.dom.minidom import parseString
 from collections import OrderedDict
 import tabulate
 from dateutil import parser
+import numpy as np
 
 
 
@@ -260,6 +264,50 @@ class analysis():
         self.awards['STATS']['STATS_MODES'] = {}
         for count, mode in details:
             self.awards['STATS']['STATS_MODES'][mode] = count
+
+
+    def doSTATS_LOTWSTATS (self):
+        expr = "select qsl_sent, qsl_received "
+        expr += self.conditions ['from']
+        expr +=  self.conditions['LoTWCard']
+        expr += ' true'
+
+        res = self.cur.execute (expr)
+        details = res.fetchall()
+        self.awards['STATS']['STATS_LOTWSTATS'] = {}
+        date_format = "%Y-%m-%d"
+
+        ds = []
+        for tx, rx in details:
+            if 'Uploaded to LoTW ' in tx:
+                tx_1 = tx[tx.index ('Uploaded to LoTW ')+17:]
+                tx_2 = tx_1[:10]
+                if 'LoTW:' in rx:
+                    rx_1 = rx[rx.index ('LoTW:')+5:]
+                    rx_2 = rx_1[:8]
+                    rx_3 = rx_2[:4] + '-' + rx_2[4:6] + '-' + rx_2[6:]
+                    t = datetime.datetime.strptime (tx_2, date_format)
+                    r = datetime.datetime.strptime (rx_3, date_format)
+                    delta = r-t
+                    ds.append (delta.days)
+                #print (tx_2, rx_3, delta.days)
+        self.awards['STATS']['STATS_LOTWSTATS']['Mean'] = np.mean(ds)
+        self.awards['STATS']['STATS_LOTWSTATS']['Median'] = np.median(ds)
+        self.awards['STATS']['STATS_LOTWSTATS']['StandardDeviation'] = np.std(ds)
+
+        print (self.awards['STATS']['STATS_LOTWSTATS'])
+
+
+        mean = np.mean(ds)
+        print (mean)
+            #Uploaded to eQSL 2022-12-25 06:25, Uploaded to LoTW 2022-12-25 06:25
+            #LoTW:20221225, LoTW:20221227, LoTW:20230102
+
+
+
+
+            #self.awards['STATS']['STATS_LOTWSTATS'][mode] = count
+
 
 
 
@@ -1062,6 +1110,7 @@ class analysis():
         self.doSTATS_DXCCBYDATE()
         self.doSTATS_MISSINGDXCCCONFIRM()
         self.doSTATS_GRIDS()
+        self.doSTATS_LOTWSTATS()
 
 
     def start(self):
