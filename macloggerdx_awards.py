@@ -295,18 +295,18 @@ class analysis():
         self.awards['STATS']['STATS_LOTWSTATS']['Median'] = np.median(ds)
         self.awards['STATS']['STATS_LOTWSTATS']['StandardDeviation'] = np.std(ds)
 
+        bins = [0] * 180
+        for bin in ds:
+            if bin > len(bins)-1:
+                bin = len(bins)-1
+            bins[bin] += 1
+        
+        print (bins)
+
+
+
+
         print (self.awards['STATS']['STATS_LOTWSTATS'])
-
-
-        mean = np.mean(ds)
-        print (mean)
-            #Uploaded to eQSL 2022-12-25 06:25, Uploaded to LoTW 2022-12-25 06:25
-            #LoTW:20221225, LoTW:20221227, LoTW:20230102
-
-
-
-
-            #self.awards['STATS']['STATS_LOTWSTATS'][mode] = count
 
 
 

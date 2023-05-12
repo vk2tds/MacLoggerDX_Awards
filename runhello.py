@@ -476,7 +476,26 @@ def setTreeView(window, hierarchy):
 app = QtWidgets.QApplication(sys.argv)
 window = MainWindow()
 
+
+
+
+details = [
+    ['OQRS','Outbox', 'Marshall Islands', '15M', 'V7/N7XR', ''],
+    ['OQRS','Outbox', 'Marshall Islands', '17M', 'V7/N7XR', ''],
+    ['OQRS','Outbox', 'Angola', '20M', 'D2UY', ''],
+    ['OQRS','Outbox', 'Angola', '17M', 'D2UY', ''],
+    ['OQRS','Outbox', 'Angola', '12M', 'D2UY', ''],
+    ['OQRS','Outbox', 'Viet Nam', '10M', 'XV1X', ''],
+    ['OQRS','Outbox', 'Cetuna', '15M', 'EA9PD', ''],
+    ['OQRS','Outbox', 'Malawi', '15M', '7Q7EMH', ''],
+    ['OQRS','Outbox', 'Micronesia', '15M', 'V63WJR', 'Anything September'],
+
+
+]    
+
 tosendoqrs = [        
+         {'Country': 'Marshall Islands', 'Band': '15M', 'Call':},
+         {'Country': 'Marshall Islands', 'Band': '17M', 'Call':'V7/N7XR'},
          {'Country': 'Angola', 'Band': '20M', 'Call':'D2UY'},
          {'Country': 'Angola', 'Band': '17M', 'Call':'D2UY'},
          {'Country': 'Angola', 'Band': '12M', 'Call':'D2UY'},
