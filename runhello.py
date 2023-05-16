@@ -151,39 +151,28 @@ class TableModel(QtCore.QAbstractTableModel):
                     #asdfjk
                     return QtGui.QColor(COLORS[4]) # We only have cards
                 if int(l) == 0: # Check to see if we have OQRS coming. Or cards sent
-                    for qrs in oqrs:
-                        if qrs['Country'] == self._vheaders[index.row()]:
+                    for dType, dSubtype, dCountry, dBand, dCallsign, dComments in details:
+                        if dCountry == self._vheaders[index.row()]:
                             s = self._hheaders[index.column()]
                             if '\r\n' in s:
                                 s = s[:s.index('\r\n')]
-                            if qrs['Band'] == s:
-                                # if we are OQRS
-                                return QtGui.QColor(COLORS[6])                
-                    for qrs in tosendoqrs:
-                        if qrs['Country'] == self._vheaders[index.row()]:
-                            s = self._hheaders[index.column()]
-                            if '\r\n' in s:
-                                s = s[:s.index('\r\n')]
-                            if qrs['Band'] == s:
-                                # if we are OQRS
-                                return QtGui.QColor(COLORS[8])                
-                    for qts in qsltosend:
-                        if qts['Country'] == self._vheaders[index.row()]:
-                            s = self._hheaders[index.column()]
-                            if '\r\n' in s:
-                                s = s[:s.index('\r\n')]
-                            if qts['Band'] == s:
-                                # if we are OQRS
-                                return QtGui.QColor(COLORS[3])                
-
-                    for sent in qslsent:
-                        if sent['Country'] == self._vheaders[index.row()]:
-                            s = self._hheaders[index.column()]
-                            if '\r\n' in s:
-                                s = s[:s.index('\r\n')]
-                            if sent['Band'] == s:
-                                # if we are OQRS
-                                return QtGui.QColor(COLORS[7])                
+                            if dBand == s:
+                                #print (dBand, s, dType)
+                                if dType == 'Bureau':
+                                    if dSubtype == 'Sent':
+                                        return QtGui.QColor(COLORS[5])                
+                                    if dSubtype == 'Outbox':
+                                        return QtGui.QColor(COLORS[9])                
+                                if dType == 'OQRS':
+                                    if dSubtype == 'Sent':
+                                        return QtGui.QColor(COLORS[6])                
+                                    if dSubtype == 'Outbox':
+                                        return QtGui.QColor(COLORS[8])                
+                                if dType == 'QSL':
+                                    if dSubtype == 'Sent':
+                                        return QtGui.QColor(COLORS[7])                
+                                    if dSubtype == 'Outbox':
+                                        return QtGui.QColor(COLORS[3])                
 
                     return QtGui.QColor(COLORS[1]) # no LOTW Confirmations
                 return QtGui.QColor(COLORS[2])
@@ -440,7 +429,7 @@ def setTableViewLegend (window):
     tv = window.tableViewLegend
     tv.setModel (None)
 
-    staticCols = ['Blank', 'No QSL', 'LoTW', 'QSL to Send', 'QSL Card', '17M', 'OQRS', 'QSL Sent', 'ToDo OQRS', '6M']
+    staticCols = ['Blank', 'No QSL', 'LoTW', 'QSL to Send', 'QSL Card', 'Bureau Sent', 'OQRS', 'QSL Sent', 'ToDo OQRS', 'Bureau Outbox']
 
     newdata = [[staticCols[x] for x in range(len(staticCols))] for y in range(1)] 
 
@@ -480,67 +469,69 @@ window = MainWindow()
 
 
 details = [
-    ['OQRS','Outbox', 'Marshall Islands', '15M', 'V7/N7XR', ''],
-    ['OQRS','Outbox', 'Marshall Islands', '17M', 'V7/N7XR', ''],
-    ['OQRS','Outbox', 'Angola', '20M', 'D2UY', ''],
-    ['OQRS','Outbox', 'Angola', '17M', 'D2UY', ''],
-    ['OQRS','Outbox', 'Angola', '12M', 'D2UY', ''],
+    ['OQRS','Sent', 'Marshall Islands', '15M', 'V7/N7XR', ''],
+    ['OQRS','Sent', 'Marshall Islands', '17M', 'V7/N7XR', ''],
+    ['OQRS','Sent', 'Angola', '20M', 'D2UY', ''],
+    ['OQRS','Sent', 'Angola', '17M', 'D2UY', ''],
+    ['OQRS','Sent', 'Angola', '12M', 'D2UY', ''],
     ['OQRS','Outbox', 'Viet Nam', '10M', 'XV1X', ''],
     ['OQRS','Outbox', 'Cetuna', '15M', 'EA9PD', ''],
-    ['OQRS','Outbox', 'Malawi', '15M', '7Q7EMH', ''],
+    ['OQRS','Sent', 'Malawi', '15M', '7Q7EMH', ''],
     ['OQRS','Outbox', 'Micronesia', '15M', 'V63WJR', 'Anything September'],
+    ['OQRS','Sent', 'South Cook Islands', '20M', 'E51CIK', ''],
+    ['OQRS','Sent', 'South Cook Islands', '15M', 'E51CIK', ''],
+    ['OQRS','Sent', 'South Cook Islands', '17M', 'E51WEG', ''],
+    ['OQRS','Sent', 'Malawi', '17M', '7Q7EMH', ''],
+    ['OQRS','Sent', 'Malawi', '20M', '7Q7EMH', ''],
+    ['OQRS','Sent', 'East Malaysia', '30M', '9M8DEN', ''],
+    ['OQRS','Sent', 'Belarus', '12M', 'EW8W', ''],
+    ['OQRS','Sent', 'Belarus', '30M', 'EW8W', ''],
+    ['OQRS','Sent', 'Viet Nam', '15M', 'XV1X', ''],
+    ['OQRS','Sent', 'Viet Nam', '30M', '3W1T', ''],
+    ['OQRS','Sent', 'India', '10M', 'VU2GRM', ''],
+    # Hong Kong VR25XMT
+
+    ['QSL','Outbox', 'Malta', '17M', '9H1ET', 'x2'],
+    ['QSL','Outbox', 'Solomon Islands', '40M', 'H44MS', ''],
+    ['QSL','Outbox', 'Gibraltar', '15M', 'ZB2R', 'Direct only'],
+    ['QSL','Outbox', 'Crete', '15M', 'SV9MBH', 'Direct only'],
+    #['QSL','Outbox', 'Guam', '40M', 'KG6JDX', ''],
+    #['QSL','Outbox', 'Guam', '12M', 'KG6JDX', ''],
+    ['QSL','Outbox', 'Luxemburg', '10M', 'YV5DR', ''],
+
+    ['QSL','Outbox', 'Latvia', '12M', 'YL3CW', ''],
+    ['QSL','Outbox', 'Cyprus', '15M', '5B4AJG', ''],
+    ['QSL','Outbox', 'Azores', '17M', 'CU7AA', ''],
+    ['QSL','Outbox', 'Balearic Islands', '17M', 'EA6SA', ''],
+    ['QSL','Outbox', 'Balearic Islands', '30M', 'EA6TH', ''],
+    ['QSL','Outbox', 'Belarus', '17M', 'EU1FQ', ''],
+    ['QSL','Outbox', 'Venezuela', '12M', 'YV2AVT', ''],
+
+    ['QSL','Sent', 'Costa Rica', '10M', 'TI3NEL', 'A$5 April 2023'],
+    ['QSL','Sent', 'Moldova', '15M', 'ER3RE', 'A$5 April 2023'],
+    ['QSL','Sent', 'Lithuania', '15M', 'LY3PW', 'A$5 April 2023'],
+    ['QSL','Sent', 'Czech Republic', '15M', 'OK1DBE', '8 May 2023'],
+
+    ['Bureau','Outbox', 'Turkey', '15M', 'TC100YEAR', ''],
+    ['Bureau','Outbox', 'Balearic Islands', '15M', 'EA6TH', ''],
+    ['Bureau','Outbox', 'Balearic Islands', '30M', 'EA6TH', ''],
+    ['Bureau','Outbox', 'Belarus', '17M', 'EU1FQ', ''],
+    ['Bureau','Outbox', 'Azores', '17M', 'CU7AA', ''],
+    ['Bureau','Outbox', 'Croatia', '30M', '9A1CCB', 'Radio Club'],
+    ['Bureau','Outbox', 'Latvia', '12M', 'YL3CW', ''],
+    ['Bureau','Outbox', 'Luxembourg', '30M', 'LX1JH', ''],
+    ['Bureau','Outbox', 'Venezuela', '10M', 'YV5DR', ''],
+    # West Malaysia - 30M - 9M2EGE - Direct
+    # Slovak Republic - 20M - OM3CND 
+    # Portugal - 20M - CT2GSW
+    # Netherlands - 15M - PA3ATZ
+    ['Bureau','Sent', 'Argentina', '12M', 'LU6XQB', 'Via OQRS'],
+
+
 
 
 ]    
 
-tosendoqrs = [        
-         {'Country': 'Marshall Islands', 'Band': '15M', 'Call':},
-         {'Country': 'Marshall Islands', 'Band': '17M', 'Call':'V7/N7XR'},
-         {'Country': 'Angola', 'Band': '20M', 'Call':'D2UY'},
-         {'Country': 'Angola', 'Band': '17M', 'Call':'D2UY'},
-         {'Country': 'Angola', 'Band': '12M', 'Call':'D2UY'},
-         {'Country': 'Viet Nam', 'Band': '10M', 'Call':'XV1X'},
-         {'Country': 'Cetuna', 'Band': '15M', 'Call':'EA9PD'},
-         {'Country': 'Malawi', 'Band': '15M', 'Call':'7Q7EMH'},
-         {'Country': 'Micronesia', 'Band': '15M', 'Call':'V63WJR'}, # Anything september
-
-]
-
-
-oqrs = [ {'Country': 'South Cook Islands', 'Band': '20M', 'Call':'E51CIK'},
-         {'Country': 'South Cook Islands', 'Band': '17M', 'Call':'E51WEG'},
-         {'Country': 'Malawi', 'Band': '17M', 'Call':'7Q7EMH'},
-         {'Country': 'Malawi', 'Band': '20M', 'Call':'7Q7EMH'},
-         {'Country': 'East Malaysia', 'Band': '30M', 'Call':'9M8DEN'},
-         {'Country': 'Belarus', 'Band': '30M', 'Call':'EW8W'},
-         {'Country': 'Viet Nam', 'Band': '15M', 'Call':'XV1X'},
-         {'Country': 'India', 'Band': '10M', 'Call':'VU2GRM'},
-         {'Country': 'Viet Nam', 'Band': '30M', 'Call':'3W1T'},
-]
-
-qslsent = [ {'Country': 'Costa Rica', 'Band': '10M', 'Call':'TI3NEL', 'When': 'A$5 April 2023'},
-            {'Country': 'Moldova' , 'Band': '15M', 'Call':'ER3RE', 'When': 'A$5 April 2023'},
-            {'Country': 'Lithuania' , 'Band': '15M', 'Call':'LY3PW', 'When': 'A$5 April 2023'},
-            {'Country': 'Czech Republic' , 'Band': '15M', 'Call':'OK1DBE', 'When': '8 May 2023'},
-]
-
-qsltosend = [ {'Country': 'Malta', 'Band': '17M', 'Call':'9H1ET', 'Comments': 'x2'},
-              {'Country': 'Solomon Islands', 'Band': '40M', 'Call':'H44MS', 'Comments': ''},
-              {'Country': 'Gibraltar', 'Band': '15M', 'Call':'ZB2R', 'Comments': ''},  
-              {'Country': 'Venezuela', 'Band': '10M', 'Call':'YV5DR', 'Comments': ''},  
-              {'Country': 'Crete', 'Band': '15M', 'Call':'SV9MBH', 'Comments': ''},  
-              {'Country': 'Guam', 'Band': '40M', 'Call':'KG6JDX', 'Comments': ''},  
-              {'Country': 'Guam', 'Band': '12M', 'Call':'KG6JDX', 'Comments': ''},  
-              {'Country': 'Luxemburg', 'Band': '30M', 'Call':'LX1JH', 'Comments': ''},  
-              {'Country': 'Latvia', 'Band': '12M', 'Call':'YL3CW', 'Comments': ''},  
-              {'Country': 'Cyprus', 'Band': '15M', 'Call':'5B4AJG', 'Comments': ''},  
-              {'Country': 'Argentina', 'Band': '12M', 'Call':'LU6XQB', 'Comments': 'OQRS Free but via bearu'},  
-              {'Country': 'Azores', 'Band': '17M', 'Call':'CU7AA', 'Comments': ''}, 
-              {'Country': 'Balearic Islands', 'Band': '17M', 'Call':'EA6SA', 'Comments': ''}, 
-              {'Country': 'Balearic Islands', 'Band': '30M', 'Call':'EA6TH', 'Comments': ''}, 
-              {'Country': 'Belarus', 'Band': '17M', 'Call':'EU1FQ', 'Comments': ''}, 
-
-            ]
 
 
 
