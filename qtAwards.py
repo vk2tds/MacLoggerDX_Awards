@@ -42,6 +42,24 @@ class MainWindow(QtWidgets.QMainWindow):
 
 
 
+    def autoResize(self):
+        margins = self.contentsMargins()
+        height = self.height()
+        width = self.width()
+
+        #self.x()
+
+        #self.tabWidget1.setFixedHeight(height- int((margins.top() + margins.bottom())/2))
+        self.tabWidget1.setFixedHeight(height- 50)
+        self.tabWidget1.setFixedWidth (width- 50)
+        
+        self.treeView.setFixedHeight(self.tabWidget1.height()-50)
+        self.treeView.setFixedWidth (self.tabWidget1.width()-50)
+        self.tableView.setFixedHeight(self.tabWidget1.height()-200)
+        self.tableView.setFixedWidth (self.tabWidget1.width()-50)
+
+        self.tableViewLegend.setFixedWidth (self.tabWidget1.width()-50)
+        self.tableViewLegend.setFixedHeight(50)
 
 
     def refreshButtonClicked (self):
@@ -53,6 +71,11 @@ class MainWindow(QtWidgets.QMainWindow):
         setTableView(self, rawtable)
         setTableViewLegend(self)
         #print ('ButtonFinish')        
+
+
+
+    def resizeEvent(self, event):
+        self.autoResize()
 
 
 
@@ -106,7 +129,85 @@ class TableModel(QtCore.QAbstractTableModel):
         self._hheaders = hheaders
         self._vheaders = vheaders
 
+    def data(self, index, role):
+        if role == QtCore.Qt.ItemDataRole.DisplayRole:
+            # See below for the nested-list data structure.
+            # .row() indexes into the outer list,
+            # .column() indexes into the sub-list
+            value = self._data[index.row()][index.column()]
+            if '/' in value:
+                (l,c,q) = value.split('/',2)
+                return ('%s/%s' %(l,q))
+            else:
+                    return value
+        if role == QtCore.Qt.ItemDataRole.BackgroundRole:
+            value = self._data[index.row()][index.column()]
+            if value == '-':
+                return QtGui.QColor(COLORS[0])
+            if '/' in value:
+                #print (value)
+                (l,c,q) = value.split('/',2)
+                if int(c) > 0 and int(l) == 0:
+                    #asdfjk
+                    return QtGui.QColor(COLORS[4]) # We only have cards
+                if int(l) == 0: # Check to see if we have OQRS coming. Or cards sent
+                    for dType, dSubtype, dCountry, dBand, dCallsign, dComments in details:
+                        if dCountry == self._vheaders[index.row()]:
+                            s = self._hheaders[index.column()]
+                            if '\r\n' in s:
+                                s = s[:s.index('\r\n')]
+                            if dBand == s:
+                                #print (dBand, s, dType)
+                                if dType == 'Bureau':
+                                    if dSubtype == 'Sent':
+                                        return QtGui.QColor(COLORS[5])                
+                                    if dSubtype == 'Outbox':
+                                        return QtGui.QColor(COLORS[9])                
+                                if dType == 'OQRS':
+                                    if dSubtype == 'Sent':
+                                        return QtGui.QColor(COLORS[6])                
+                                    if dSubtype == 'Outbox':
+                                        return QtGui.QColor(COLORS[8])                
+                                if dType == 'QSL':
+                                    if dSubtype == 'Sent':
+                                        return QtGui.QColor(COLORS[7])                
+                                    if dSubtype == 'Outbox':
+                                        return QtGui.QColor(COLORS[3])                
 
+                    return QtGui.QColor(COLORS[1]) # no LOTW Confirmations
+                return QtGui.QColor(COLORS[2])
+        if role == QtCore.Qt.ItemDataRole.ToolTipRole:
+            value = self._data[index.row()][index.column()]
+            if '/' in value:
+                (l,c,q) = value.split('/',2)
+                if int(c) > 0: # we have some cards
+                    ret = '<div style="color:green;">Cards: ' + c + '</div>\r\n'
+                    return ret    
+                if l == '0':
+                    ret = ''
+                    for line in value.split('\r\n'):
+                        if ',' in line:
+                            #ret += line + '\r\n'
+                            (call, when, lhen) = line.split(',',2)
+                            (a,b) = when.split('.',1)
+                            wint = int(a)
+                            if lhen == '':
+                                lint = 'NEVER'
+                            else:
+                                True
+                                lint = lhen
+                                #lint = int(lhen)
+                            dt = datetime.datetime.fromtimestamp(wint)
+                            dtd = datetime.datetime.now() - dt
+                            if dtd.days < 14:
+                                ret += '<div style="color:green;">' + (('%s: %s %s') % (str(dt), call, str(lint))).replace (' ', '&nbsp;') + '</div>\r\n'
+                            elif dtd.days < 28:
+                                ret += '<div style="color:orange;">' + (('%s: %s %s') % (str(dt), call, str(lint))).replace (' ', '&nbsp;') + '</div>\r\n'
+                            elif dtd.days < 90:
+                                ret += '<div style="color:red;">' + (('%s: %s %s') % (str(dt), call, str(lint))).replace (' ', '&nbsp;') + '</div>\r\n'
+                            else:
+                                ret += '<div style="color:black;">' + (('%s: %s %s') % (str(dt), call, str(lint))).replace (' ', '&nbsp;') + '</div>\r\n'
+                    return ret
 
     def rowCount(self, index):
         # The length of the outer list.
@@ -244,16 +345,69 @@ def json_tree(tree, parent, dictionary, tag):
                 if not key in ('Contacts', 'Required', 'Fields', 'Fields_Count', 'Grids', 'Grids_Count'):
                     parent.appendRow ([QtGui.QStandardItem ('P' + str(key)),QtGui.QStandardItem (str(dictionary[key]))] )
 
+def setTableView (window, rawtable):
+    #tv.setModel (TableModel)
+
+    tv = window.tableView
+    tv.setModel (None)
+
+    r = rawtable
+
+    staticCols = ['160M', '80M', '40M', '30M', '20M', '17M', '15M', '12M', '10M', '6M']
+
+    newdata = [[0 for x in range(len(staticCols))] for y in range(len(r)-1)] 
+    v = OrderedDict()
+    hor = []
+    ver = []
+    j = 0
+    lotw_confirmed = 0
+    lotw_unconfirmed = 0
+
+
+    for row in r:
+        newRow = []
+        if j == 0: # First row only
+            i = 0
+            for col in row:
+                if i != 0: # ignore first column of data
+                    v[staticCols[i-1]] = []
+                    if '\r\n' in col:
+                        (a,b) = col.split('\r\n')
+                        if '/' in b:
+                            (l,c,q) = b.split('/',2)
+                            hor.append ('%s\r\n%s/%s' % (a,l,q))
+                        else:
+                            hor.append (col)    
+    
+                    else:
+                        hor.append (col)
+                i += 1
+        else:
+            i = 0
+            for col in row:
+                if i == 0:
+                    ver.append (col)
+                else: 
+                    newdata[j-1][i-1] = col
+                    v[staticCols[i-1]].append (col)
+                    if '\r\n' in col:
+                        (a,b) = col.split('\r\n',1)
+                        lotw_unconfirmed += 1
+                    else:
+                        if col != '-':
+                            lotw_confirmed += 1
+                i += 1
+        j += 1
 
     # expand later... https://www.pythonguis.com/tutorials/pyqt6-qtableview-modelviews-numpy-pandas/
 
     #print ('Confirmed', lotw_confirmed, 'total', lotw_confirmed + lotw_unconfirmed)
 
-    #window.tabWidget1.setTabText (1, 'DXCC Status - ' + str(lotw_confirmed) + '/' + str(lotw_confirmed + lotw_unconfirmed))
+    window.tabWidget1.setTabText (1, 'DXCC Status - ' + str(lotw_confirmed) + '/' + str(lotw_confirmed + lotw_unconfirmed))
 
 
-    #model = TableModel(newdata, hor, ver)
-    #tv.setModel(model)
+    model = TableModel(newdata, hor, ver)
+    tv.setModel(model)
 
 
 def setTableViewLegend (window):
@@ -295,8 +449,8 @@ def setTreeView(window, hierarchy):
 
 
 
-#app = QtWidgets.QApplication(sys.argv)
-#window = MainWindow()
+app = QtWidgets.QApplication(sys.argv)
+window = MainWindow()
 
 
 
@@ -304,6 +458,9 @@ def setTreeView(window, hierarchy):
 details = [
     ['OQRS','Sent', 'Marshall Islands', '15M', 'V7/N7XR', ''],
     ['OQRS','Sent', 'Marshall Islands', '17M', 'V7/N7XR', ''],
+    #['OQRS','Sent', 'Angola', '20M', 'D2UY', ''],
+    #['OQRS','Sent', 'Angola', '17M', 'D2UY', ''],
+    #['OQRS','Sent', 'Angola', '12M', 'D2UY', ''],
     ['OQRS','Outbox', 'Viet Nam', '10M', 'XV1X', ''],
     ['OQRS','Outbox', 'Cetuna & Melilia', '15M', 'EA9PD', ''],
     ['OQRS','Sent', 'Malawi', '15M', '7Q7EMH', ''],
@@ -311,6 +468,7 @@ details = [
     ['OQRS','Sent', 'South Cook Islands', '20M', 'E51CIK', ''],
     ['OQRS','Sent', 'South Cook Islands', '15M', 'E51CIK', ''],
     ['OQRS','Sent', 'South Cook Islands', '17M', 'E51WEG', ''],
+    #['OQRS','Sent', 'Malawi', '17M', '7Q7EMH', ''],
     ['OQRS','Sent', 'Malawi', '20M', '7Q7EMH', ''],
     ['OQRS','Sent', 'East Malaysia', '30M', '9M8DEN', ''],
     ['OQRS','Sent', 'Belarus', '12M', 'EW8W', ''],
@@ -318,11 +476,15 @@ details = [
     ['OQRS','Sent', 'Viet Nam', '15M', 'XV1X', ''],
     ['OQRS','Sent', 'Viet Nam', '30M', '3W1T', ''],
     ['OQRS','Sent', 'India', '10M', 'VU2GRM', ''],
+    #['OQRS','Sent', 'Hong Kong', '20M', 'VR25XMT', ''],
     
 
     ['QSL','Outbox', 'Malta', '17M', '9H1ET', 'x2'],
     ['QSL','Outbox', 'Solomon Islands', '40M', 'H44MS', ''],
     ['QSL','Outbox', 'Gibraltar', '15M', 'ZB2R', 'Direct only'],
+    #['QSL','Outbox', 'Crete', '15M', 'SV9MBH', 'Direct only'],
+    #['QSL','Outbox', 'Guam', '40M', 'KG6JDX', ''],
+    #['QSL','Outbox', 'Guam', '12M', 'KG6JDX', ''],
     ['QSL','Outbox', 'Luxemburg', '10M', 'YV5DR', ''],
 
     ['QSL','Outbox', 'Latvia', '12M', 'YL3CW', ''],
@@ -364,187 +526,6 @@ details = [
 #displayAll(oqrs, qslsent)
 
 
-#app.exec()
-
-
-
-
-def challengeTableCell(value, country, band):
-    roleText = ''
-    roleToolTip = ''
-    roleBackground = ''
-
-    # roleText
-    v = ''
-    if '\r\n' in value:
-        #print ('value', value)
-        x = value.split ('\r\n')
-        v = x[0]
-    else:
-        v = value  
-
-    if '/' in v:
-        (l,c,q) = v.split('/',2)
-        roleText = ('%s/%s' %(l,q))
-    else:
-        roleText = ''
-        
-
-    # roleBackground
-    if value == '-':
-        roleBackground =  COLORS[0]
-    if '/' in value:
-        #print (value)
-        (l,c,q) = value.split('/',2)
-        if int(c) > 0 and int(l) == 0:
-            #asdfjk
-            roleBackground = COLORS[4] # We only have cards
-        if int(l) == 0: # Check to see if we have OQRS coming. Or cards sent
-            for dType, dSubtype, dCountry, dBand, dCallsign, dComments in details:
-                if dCountry == country:
-                    if dBand == band:
-                        # s = self._hheaders[index.column()]
-                        # if '\r\n' in s:
-                        #     s = s[:s.index('\r\n')]
-                        # if dBand == s:
-                            #print (dBand, s, dType)
-                            if dType == 'Bureau':
-                                if dSubtype == 'Sent':
-                                    roleBackground =  COLORS[5]                
-                                if dSubtype == 'Outbox':
-                                    roleBackground =  COLORS[9]                
-                            if dType == 'OQRS':
-                                if dSubtype == 'Sent':
-                                    roleBackground =  COLORS[6]                
-                                if dSubtype == 'Outbox':
-                                    roleBackground =  COLORS[8]                
-                            if dType == 'QSL':
-                                if dSubtype == 'Sent':
-                                    roleBackground =  COLORS[7]                
-                                if dSubtype == 'Outbox':
-                                    roleBackground =  COLORS[3]                
-            if roleBackground == '':
-                roleBackground =  COLORS[1] # no LOTW Confirmations
-        if roleBackground == '':
-            roleBackground =  COLORS[2]
-        
-    # roleToolTip
-    if '/' in value:
-        (l,c,q) = value.split('/',2)
-        if int(c) > 0: # we have some cards
-            roleToolTip = '<div style="color:green;">Cards: ' + c + '</div>\r\n'
-        if l == '0':
-            ret = ''
-            for line in value.split('\r\n'):
-                if ',' in line:
-                    #ret += line + '\r\n'
-                    (call, when, lhen) = line.split(',',2)
-                    (a,b) = when.split('.',1)
-                    wint = int(a)
-                    if lhen == '':
-                        lint = 'NEVER'
-                    else:
-                        True
-                        lint = lhen
-                        #lint = int(lhen)
-                    dt = datetime.datetime.fromtimestamp(wint)
-                    dtd = datetime.datetime.now() - dt
-                    if dtd.days < 14:
-                        ret += '<div style="color:green;">' + (('%s: %s %s') % (str(dt), call, str(lint))).replace (' ', '&nbsp;') + '</div>\r\n'
-                    elif dtd.days < 28:
-                        ret += '<div style="color:orange;">' + (('%s: %s %s') % (str(dt), call, str(lint))).replace (' ', '&nbsp;') + '</div>\r\n'
-                    elif dtd.days < 90:
-                        ret += '<div style="color:red;">' + (('%s: %s %s') % (str(dt), call, str(lint))).replace (' ', '&nbsp;') + '</div>\r\n'
-                    else:
-                        ret += '<div style="color:black;">' + (('%s: %s %s') % (str(dt), call, str(lint))).replace (' ', '&nbsp;') + '</div>\r\n'
-            roleToolTip = ret
-
-    html = ''
-    if roleBackground == '':
-        html += '<td>'
-    else:
-        html += '<td bgcolor=' + roleBackground + '>'
-
-    if len(roleToolTip) > 0:
-        html += '<div class="tooltip">'
-    html += roleText 
-    if len(roleToolTip) > 0:
-        html += '<span class="tooltiptext">'
-        html += roleToolTip
-        html += '</span>'
-        html += '</div>'
-    html += '</td>'
-    return html
-
-
-def challengeTable (r):
-
-    staticCols = ['160M', '80M', '40M', '30M', '20M', '17M', '15M', '12M', '10M', '6M']
-
-    newdata = [[0 for x in range(len(staticCols))] for y in range(len(r)-1)] 
-    v = OrderedDict()
-    hor = []
-    ver = []
-    j = 0
-    lotw_confirmed = 0
-    lotw_unconfirmed = 0
-
-
-    html = ''
-    html += '<table>'
-
-    for row in r:
-        newRow = []
-        if j == 0: # First row only
-            html += '<th>'
-            i = 0
-            for col in row:
-
-
-
-                if i != 0: # ignore first column of data
-                    v[staticCols[i-1]] = []
-                    if '\r\n' in col:
-                        (a,b) = col.split('\r\n')
-                        if '/' in b:
-                            (l,c,q) = b.split('/',2)
-                            html += '<td>' + ('%s\r\n%s/%s' % (a,l,q)) + '</td>'
-                        else:
-                            html += '<td>' + col + '</td>'
-    
-                    else:
-                        html += '<td>' + col + '</td>'
-
-                i += 1
-            html += '</th>'
-        else:
-            i = 0
-            html += '<tr>'
-            country = ''
-            for col in row:
-                if i == 0:
-                    country = col
-                    html += '<td>' + col + '</td>'
-                else: 
-                    newdata[j-1][i-1] = col
-                    v[staticCols[i-1]].append (col)
-                    if '\r\n' in col:
-                        (a,b) = col.split('\r\n',1)
-                        lotw_unconfirmed += 1
-                    else:
-                        if col != '-':
-                            lotw_confirmed += 1
-                    if col is None:
-                        html += '<td>xxx</td>'
-                    else:
-                        html += challengeTableCell (col, country, staticCols[i-1])
-                i += 1
-            html += '</tr>'
-        j += 1
-
-    html += '</table>'
-
-    return html
 
 
 
@@ -552,107 +533,4 @@ def challengeTable (r):
 
 
 
-
-
-
-
-
-
-
-
-
-macloggerdx_awards.analysis.start()
-
-rawtable = macloggerdx_awards.analysis.rawtable
-table = challengeTable(rawtable)
-
-
-
-
-tablestyle = '''table, th, td {
-  border: 1px solid black;
-  border-collapse: collapse;
-}
-
-/* Tooltip container */
-.tooltip {
-  position: relative;
-  display: inline-block;
-  border-bottom: 1px dotted black; /* If you want dots under the hoverable text */
-}
-
-/* Tooltip text */
-.tooltip .tooltiptext {
-  visibility: hidden;
-  width: 120px;
-  background-color: #555;
-  color: #fff;
-  text-align: center;
-  padding: 5px 0;
-  border-radius: 6px;
-
-  /* Position the tooltip text */
-  position: absolute;
-  z-index: 1;
-  bottom: 125%;
-  left: 50%;
-  margin-left: -60px;
-
-  /* Fade in tooltip */
-  opacity: 0;
-  transition: opacity 0.3s;
-}
-
-/* Tooltip arrow */
-.tooltip .tooltiptext::after {
-  content: "";
-  position: absolute;
-  top: 100%;
-  left: 50%;
-  margin-left: -5px;
-  border-width: 5px;
-  border-style: solid;
-  border-color: #555 transparent transparent transparent;
-}
-
-/* Show the tooltip text when you mouse over the tooltip container */
-.tooltip:hover .tooltiptext {
-  visibility: visible;
-  opacity: 1;
-}
-
-
-
-'''
-
-
-from http.server import HTTPServer, BaseHTTPRequestHandler
-
-class MyHandler(BaseHTTPRequestHandler):
-    # https://parsiya.net/blog/2020-11-15-customizing-pythons-simplehttpserver/
-    # https://armantutorial.wordpress.com/2022/08/13/how-to-make-a-web-server-in-python/
-    def do_GET(self):
-        # send 200 response
-        self.send_response(200)
-        self.send_header("Content-type", "text/html")
-        # send response headers
-        self.end_headers()
-        # send the body of the response
-
-
-        self.wfile.write(bytes("<html>", "utf-8"))
-        self.wfile.write(bytes("<head>", "utf-8"))
-        self.wfile.write(bytes("<title></title>", "utf-8"))
-        self.wfile.write(bytes("<title></title>", "utf-8"))
-        self.wfile.write(bytes("<style>" + tablestyle + "</style>", "utf-8"))
-        self.wfile.write(bytes("</head>", "utf-8"))
-        self.wfile.write(bytes("<body>", "utf-8"))
-        self.wfile.write (bytes(table, "utf-8"))
-
-        self.wfile.write(bytes("</body>", "utf-8"))
-        self.wfile.write(bytes("</html>", "utf-8"))
-
-
-httpd = HTTPServer(('localhost', 10000), MyHandler)
-httpd.serve_forever()
-
+app.exec()
