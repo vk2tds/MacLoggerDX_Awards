@@ -20,15 +20,18 @@ import datetime
 import logging
 
 from flask import Flask, render_template, redirect, url_for, flash
+from flask_sock import Sock
 
 import macloggerdx_awards
 import awards_tree
 import dxcc_challenge
+import live_monitor
 
 log = logging.getLogger("app." + __name__)
 
 app = Flask(__name__)
 app.secret_key = 'macloggerdx-awards'
+sock = Sock(app)
 
 analysis = macloggerdx_awards.analysis
 
@@ -46,6 +49,15 @@ def refresh():
 
 
 refresh()
+
+live_monitor.init_live_monitor(app, sock, live_monitor.LiveMonitorConfig(
+    database_path=analysis.database_name,
+    qso_table=analysis.qso_table,
+    dxcc_file=analysis.dxcc_file,
+    my_call="VK2TDS",
+    udp_host="127.0.0.1",
+    udp_port=2237,
+))
 
 
 @app.route('/')
@@ -80,4 +92,4 @@ def refresh_view():
 
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5050)
+    app.run(debug=True, port=5050, threaded=True)

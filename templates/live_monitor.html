@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}Live Monitor{% endblock %}
+{% block content %}
+<h1>Live Monitor</h1>
+
+<style>
+  .live-toolbar { display: flex; gap: 1.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.75rem; font-size: 0.9rem; }
+  .live-toolbar label { display: flex; align-items: center; gap: 0.35rem; }
+  #conn-dot { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 50%; background: #999; }
+  #conn-dot.up { background: #2e7d32; }
+  #conn-dot.down { background: #c62828; }
+  table.live-table { border-collapse: collapse; width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; }
+  table.live-table th, table.live-table td { padding: 0.2rem 0.5rem; border-bottom: 1px solid #eee; text-align: left; white-space: nowrap; }
+  table.live-table tbody tr:hover { background: #f5f5f5; }
+  .row-cq-mismatch { text-decoration: line-through; opacity: 0.45; }
+  .row-new-dxcc { background: #fff3cd; }
+  .row-new-dxcc.row-confirmed { background: #d4edda; }
+  .row-worked { color: #999; }
+  .tag { display: inline-block; border-radius: 3px; padding: 0 0.3rem; font-size: 0.75rem; margin-left: 0.25rem; }
+  .tag-new { background: #ffc107; color: #333; }
+  .tag-confirmed { background: #28a745; color: #fff; }
+  .tag-worked { background: #ddd; color: #555; }
+  .tag-cq { background: #17a2b8; color: #fff; }
+  #live-status { font-size: 0.85rem; color: #555; margin-bottom: 0.5rem; }
+</style>
+
+<div class="live-toolbar">
+  <span><span id="conn-dot"></span> <span id="conn-text">connecting…</span></span>
+  <label>My call <input id="my-call" type="text" value="{{ my_call }}" size="10"></label>
+  <label><input id="cq-filter" type="checkbox" checked> Dim CQs not for my call area</label>
+  <label><input id="hide-worked" type="checkbox"> Hide already-worked</label>
+  <span>WSJT-X UDP port {{ udp_port }}</span>
+</div>
+<div id="live-status">No WSJT-X status received yet -- check WSJT-X Settings / Reporting / UDP Server is enabled and pointed at 127.0.0.1:{{ udp_port }}.</div>
+
+<table class="live-table">
+  <thead>
+    <tr>
+      <th>Time</th><th>Band</th><th>Mode</th><th>SNR</th><th>Call</th><th>Grid</th><th>DXCC</th><th>Message</th><th>Flags</th>
+    </tr>
+  </thead>
+  <tbody id="live-body"></tbody>
+</table>
+
+<script>
+(function () {
+  const body = document.getElementById('live-body');
+  const dot = document.getElementById('conn-dot');
+  const connText = document.getElementById('conn-text');
+  const statusLine = document.getElementById('live-status');
+  const cqFilterBox = document.getElementById('cq-filter');
+  const hideWorkedBox = document.getElementById('hide-worked');
+  const myCallBox = document.getElementById('my-call');
+  const MAX_ROWS = 300;
+
+  function fmtTime(ms) {
+    if (ms === null || ms === undefined) return '';
+    const totalSec = Math.floor(ms / 1000);
+    const h = String(Math.floor(totalSec / 3600) % 24).padStart(2, '0');
+    const m = String(Math.floor(totalSec / 60) % 60).padStart(2, '0');
+    const s = String(totalSec % 60).padStart(2, '0');
+    return `${h}:${m}:${s}`;
+  }
+
+  function renderDecode(ev) {
+    const tr = document.createElement('tr');
+    const classes = [];
+    if (ev.cq_area_mismatch) classes.push('row-cq-mismatch');
+    if (ev.is_new_dxcc) classes.push('row-new-dxcc');
+    if (ev.confirmed_ever) classes.push('row-confirmed');
+    if (ev.worked_before && !ev.is_new_dxcc) classes.push('row-worked');
+    tr.className = classes.join(' ');
+    if (hideWorkedBox.checked && ev.worked_before) tr.style.display = 'none';
+
+    const tags = [];
+    if (ev.is_cq) tags.push('<span class="tag tag-cq">CQ' + (ev.cq_directed ? ' ' + ev.cq_directed : '') + '</span>');
+    if (ev.is_new_dxcc) tags.push('<span class="tag tag-new">NEW DXCC</span>');
+    if (ev.is_new_grid) tags.push('<span class="tag tag-new">NEW GRID</span>');
+    if (ev.confirmed_ever) tags.push('<span class="tag tag-confirmed">CFM</span>');
+    else if (ev.worked_before) tags.push('<span class="tag tag-worked">WKD</span>');
+
+    tr.innerHTML = `
+      <td>${fmtTime(ev.time_ms)}</td>
+      <td>${ev.band || ''}</td>
+      <td>${ev.mode || ''}</td>
+      <td>${ev.snr ?? ''}</td>
+      <td>${ev.call || ''}</td>
+      <td>${ev.grid || ''}</td>
+      <td>${ev.dxcc_name || ''}</td>
+      <td>${ev.message || ''}</td>
+      <td>${tags.join('')}</td>
+    `;
+    body.prepend(tr);
+    while (body.children.length > MAX_ROWS) body.removeChild(body.lastChild);
+  }
+
+  function renderStatus(ev) {
+    const parts = [];
+    if (ev.dial_frequency_hz) parts.push((ev.dial_frequency_hz / 1e6).toFixed(4) + ' MHz');
+    if (ev.mode) parts.push(ev.mode);
+    if (ev.dx_call) parts.push('DX: ' + ev.dx_call);
+    if (ev.transmitting) parts.push('TX');
+    statusLine.textContent = parts.length ? parts.join(' | ') : 'Connected to WSJT-X, waiting for status...';
+  }
+
+  function connect() {
+    const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+    const ws = new WebSocket(proto + location.host + '/live/ws');
+    ws.onopen = () => { dot.className = 'up'; connText.textContent = 'connected'; };
+    ws.onclose = () => { dot.className = 'down'; connText.textContent = 'disconnected -- retrying...'; setTimeout(connect, 2000); };
+    ws.onerror = () => ws.close();
+    ws.onmessage = (msg) => {
+      let ev;
+      try { ev = JSON.parse(msg.data); } catch (e) { return; }
+      if (ev.kind === 'decode') renderDecode(ev);
+      else if (ev.kind === 'status') renderStatus(ev);
+      else if (ev.kind === 'qso_logged') statusLine.textContent = 'Logged: ' + (ev.dx_call || '');
+    };
+  }
+
+  function pushConfig() {
+    fetch('/live/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cq_filter_enabled: cqFilterBox.checked, my_call: myCallBox.value }),
+    });
+  }
+  cqFilterBox.addEventListener('change', pushConfig);
+  myCallBox.addEventListener('change', pushConfig);
+
+  connect();
+})();
+</script>
+{% endblock %}

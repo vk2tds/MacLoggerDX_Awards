@@ -1,0 +1,22 @@
+ARRL DXCC LIST
+CURRENT ENTITIES
+January 2026
+
+Notes:
+#  Indicates entities with which U.S. Amateurs may legally handle third-party message traffic.
+
+
+                                                                   ZONE     Entity
+    Prefix              Entity                         Continent ITU   CQ    Code
+    ___________________ ________________________________________ _____ _____ ___
+    3A                 Monaco                             EU    27    14    260
+    F                  France                             EU    27    14    227
+    JA-JS,7J-7N        Japan                              AS    45    25    339
+    K,W,N,AA-AK#       United States of America           NA    06-08 03-05 291
+    VK#                Australia                          OC    (I)   29,30 150
+    VK9#               Cocos (Keeling) Is.                OC    54    29    038
+    9M2,4(8)           West Malaysia                      AS    54    28    299
+    9M6,8(8)           East Malaysia                      OC    54    28    046
+
+    NOTES:
+    1    Unofficial prefix.
