@@ -108,4 +108,4 @@ def refresh_view():
 
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5050, threaded=True)
+    app.run(host='0.0.0.0', debug=True, port=5050, threaded=True)
