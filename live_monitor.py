@@ -37,10 +37,12 @@ from typing import Optional
 from flask import Blueprint, jsonify, render_template, request
 
 from wsjtx_udp import (
+    MSG_CLEAR,
     MSG_DECODE,
     MSG_QSO_LOGGED,
     MSG_STATUS,
     WsjtxMessage,
+    build_reply,
     run_listener,
 )
 from ft8_parser import parse_message, base_callsign
@@ -104,12 +106,15 @@ class LiveMonitor:
         self.history = deque(maxlen=config.history_size)
         self.wsjtx_status: dict = {}
         self.cq_filter_enabled = True
+        self._recent_decodes: deque = deque()
+        self._recent_decodes_set: set = set()
 
         self._clients_lock = threading.Lock()
         self._clients: list = []
         self._last_cache_refresh = time.time()
         self._thread: Optional[threading.Thread] = None
         self._loop = None
+        self._transport = None
 
     # -- lifecycle -------------------------------------------------------
 
@@ -130,7 +135,7 @@ class LiveMonitor:
 
     async def _main(self):
         import asyncio
-        await run_listener(
+        self._transport = await run_listener(
             self._on_message,
             host=self.config.udp_host,
             port=self.config.udp_port,
@@ -138,6 +143,34 @@ class LiveMonitor:
         )
         while True:
             await asyncio.sleep(3600)
+
+    # -- double-click-to-call: reply to WSJT-X on the same socket we're
+    # listening with, mimicking a double-click on a decode in WSJT-X itself --
+
+    def send_reply(self, event: dict) -> bool:
+        raw = event.get("raw") or {}
+        source = event.get("source")
+        if not source or self._transport is None or self._loop is None:
+            log.warning("Cannot send WSJT-X reply -- listener not ready or no source address")
+            return False
+        try:
+            data = build_reply(
+                client_id=event.get("wsjtx_id") or "WSJT-X",
+                time_ms=raw.get("time_ms") or 0,
+                snr=raw.get("snr") or 0,
+                delta_time_s=raw.get("delta_time_s") or 0.0,
+                delta_freq_hz=raw.get("delta_freq_hz") or 0,
+                mode=raw.get("mode") or "",
+                message=raw.get("message") or "",
+                low_confidence=bool(raw.get("low_confidence")),
+            )
+        except Exception:
+            log.exception("Failed to build WSJT-X reply for %s", raw.get("message"))
+            return False
+        dest = (source[0], source[1])
+        self._loop.call_soon_threadsafe(self._transport.sendto, data, dest)
+        log.info("Sent WSJT-X reply for %r to %s", raw.get("message"), dest)
+        return True
 
     # -- WSJT-X message handling -----------------------------------------
 
@@ -151,6 +184,14 @@ class LiveMonitor:
             elif msg.type == MSG_QSO_LOGGED:
                 self._broadcast({"kind": "qso_logged", "dx_call": msg.fields.get("dx_call")})
                 self._last_cache_refresh = 0  # force a cache refresh on the next decode
+            elif msg.type == MSG_CLEAR:
+                # WSJT-X's "Erase" button -- regardless of which window it
+                # says to clear (Band Activity / Rx Frequency / both), wipe
+                # both Live Monitor tables to match.
+                self.history.clear()
+                self._recent_decodes.clear()
+                self._recent_decodes_set.clear()
+                self._broadcast({"kind": "clear"})
         except Exception:
             log.exception("Error handling WSJT-X %s message", msg.type_name)
 
@@ -162,6 +203,22 @@ class LiveMonitor:
     def _handle_decode(self, msg: WsjtxMessage):
         fields = msg.fields
         text = fields.get("message") or ""
+
+        # WSJT-X (and the multicast link it's fed through) can emit the same
+        # decode more than once in a period -- e.g. a strong signal decoded
+        # on more than one audio bin, or a JT-Bridge-style relay re-sending
+        # what it received. Same period + same text is always the same
+        # over-the-air transmission, so collapse repeats before we do any
+        # lookups or broadcast to the live table.
+        dedup_key = (fields.get("time_ms"), text)
+        if dedup_key in self._recent_decodes_set:
+            return
+        self._recent_decodes_set.add(dedup_key)
+        self._recent_decodes.append(dedup_key)
+        if len(self._recent_decodes) > 200:
+            oldest = self._recent_decodes.popleft()
+            self._recent_decodes_set.discard(oldest)
+
         parsed = parse_message(text)
         self._maybe_refresh_caches()
 
@@ -180,6 +237,16 @@ class LiveMonitor:
         dxcc_id_for_flag = entity.dxcc_id if entity else (db_status.dxcc_id if db_status else None)
         if dxcc_id_for_flag is not None:
             is_new_dxcc = self.status_checker.is_new_dxcc(dxcc_id_for_flag)
+
+        # Green/orange/red (confirmed/worked/none) status, for all four
+        # band/mode scope combinations at once -- the Live Monitor page
+        # picks which one to display client-side so the Band/Mode checkboxes
+        # can re-colour instantly without a round trip.
+        call_status_scopes = db_status.status_all_scopes() if db_status else {
+            "overall": "none", "band": "none", "mode": "none", "band_mode": "none",
+        }
+        entity_status_scopes = self.status_checker.entity_status_all_scopes(dxcc_id_for_flag, band, mode)
+        grid_status_scopes = self.status_checker.grid_status_all_scopes(parsed.grid, band, mode)
 
         cq_area_mismatch = False
         if (
@@ -216,6 +283,22 @@ class LiveMonitor:
             "is_new_dxcc": is_new_dxcc,
             "is_new_grid": self.status_checker.is_new_grid4(parsed.grid) if parsed.grid else None,
             "db_error": db_status.error if db_status else None,
+            "call_status": call_status_scopes,
+            "entity_status": entity_status_scopes,
+            "grid_status": grid_status_scopes,
+            # Everything needed to send a WSJT-X "Reply" (double-click to
+            # call) for this exact decode -- see send_reply().
+            "wsjtx_id": msg.id,
+            "source": list(msg.source),
+            "raw": {
+                "time_ms": fields.get("time_ms"),
+                "snr": fields.get("snr"),
+                "delta_time_s": fields.get("delta_time_s"),
+                "delta_freq_hz": fields.get("delta_freq_hz"),
+                "mode": mode,
+                "message": text,
+                "low_confidence": fields.get("low_confidence"),
+            },
         }
         self.history.append(event)
         self._broadcast(event)
@@ -286,6 +369,12 @@ def init_live_monitor(app, sock, config: LiveMonitorConfig) -> LiveMonitor:
                 data = ws.receive()
                 if data is None:
                     break
+                try:
+                    cmd = json.loads(data)
+                except (TypeError, ValueError):
+                    continue
+                if isinstance(cmd, dict) and cmd.get("action") == "reply":
+                    _monitor.send_reply(cmd.get("event") or {})
         except Exception:
             pass
         finally:

@@ -26,12 +26,20 @@ import macloggerdx_awards
 import awards_tree
 import dxcc_challenge
 import live_monitor
+import qsl_helper
 
 log = logging.getLogger("app." + __name__)
+
+APP_VERSION = "2026.07.12"
 
 app = Flask(__name__)
 app.secret_key = 'macloggerdx-awards'
 sock = Sock(app)
+
+
+@app.context_processor
+def inject_version():
+    return {'app_version': APP_VERSION}
 
 analysis = macloggerdx_awards.analysis
 
@@ -57,6 +65,14 @@ live_monitor.init_live_monitor(app, sock, live_monitor.LiveMonitorConfig(
     my_call="VK2TDS",
     udp_host="127.0.0.1",
     udp_port=2237,
+    multicast_group="224.0.0.1",
+))
+
+qsl_helper.init_qsl_helper(app, qsl_helper.QslHelperConfig(
+    database_path=analysis.database_name,
+    qso_table=analysis.qso_table,
+    my_calls=("VK2TDS", "AX2TDS"),
+    alltxt_path="/Users/darryl/Library/Application Support/WSJT-X/ALL.TXT",
 ))
 
 

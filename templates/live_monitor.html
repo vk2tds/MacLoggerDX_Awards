@@ -4,24 +4,50 @@
 <h1>Live Monitor</h1>
 
 <style>
-  .live-toolbar { display: flex; gap: 1.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.75rem; font-size: 0.9rem; }
+  .live-toolbar { display: flex; gap: 1.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.5rem; font-size: 0.9rem; }
   .live-toolbar label { display: flex; align-items: center; gap: 0.35rem; }
   #conn-dot { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 50%; background: #999; }
   #conn-dot.up { background: #2e7d32; }
   #conn-dot.down { background: #c62828; }
-  table.live-table { border-collapse: collapse; width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; }
-  table.live-table th, table.live-table td { padding: 0.2rem 0.5rem; border-bottom: 1px solid #eee; text-align: left; white-space: nowrap; }
-  table.live-table tbody tr:hover { background: #f5f5f5; }
+
+  .scope-bar { display: flex; gap: 1.25rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.5rem; font-size: 0.85rem; color: var(--muted, #666); }
+  .scope-bar label { display: flex; align-items: center; gap: 0.3rem; }
+  .legend { display: flex; gap: 1rem; align-items: center; }
+  .legend .swatch { display: inline-block; width: 0.7rem; height: 0.7rem; border-radius: 2px; margin-right: 0.25rem; vertical-align: middle; }
+  .legend .sw-confirmed { background: #2e7d32; }
+  .legend .sw-worked { background: #e67e22; }
+  .legend .sw-none { background: #c62828; }
+
+  #live-status { font-size: 0.85rem; color: #555; margin-bottom: 0.75rem; }
+
+  .live-panels { display: flex; gap: 1.25rem; flex-wrap: wrap; align-items: flex-start; }
+  .live-panel { flex: 1 1 480px; min-width: 320px; max-width: 100%; }
+  .live-panel h2 { font-size: 0.95rem; margin: 0 0 0.35rem; }
+  .live-panel-scroll { overflow-x: auto; max-height: 70vh; overflow-y: auto; border: 1px solid var(--border, #ddd); }
+
+  table.live-table { border-collapse: collapse; width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; }
+  table.live-table th, table.live-table td { padding: 0.2rem 0.45rem; border-bottom: 1px solid #eee; text-align: left; white-space: nowrap; }
+  table.live-table thead th { position: sticky; top: 0; background: var(--bg, #fff); }
+  table.live-table tbody tr:hover { background: #f5f5f5; cursor: pointer; }
+  table.live-table tbody tr:hover td { background: inherit; }
+
   .row-cq-mismatch { text-decoration: line-through; opacity: 0.45; }
   .row-new-dxcc { background: #fff3cd; }
   .row-new-dxcc.row-confirmed { background: #d4edda; }
   .row-worked { color: #999; }
+  .row-flash { animation: live-flash 0.6s ease-out; }
+  @keyframes live-flash { from { background: #cfe8ff; } to { background: transparent; } }
+
+  .status-confirmed { color: #2e7d32; font-weight: 600; }
+  .status-worked { color: #e67e22; font-weight: 600; }
+  .status-none { color: #c62828; }
+  .status-unknown { color: inherit; }
+
   .tag { display: inline-block; border-radius: 3px; padding: 0 0.3rem; font-size: 0.75rem; margin-left: 0.25rem; }
   .tag-new { background: #ffc107; color: #333; }
   .tag-confirmed { background: #28a745; color: #fff; }
   .tag-worked { background: #ddd; color: #555; }
   .tag-cq { background: #17a2b8; color: #fff; }
-  #live-status { font-size: 0.85rem; color: #555; margin-bottom: 0.5rem; }
 </style>
 
 <div class="live-toolbar">
@@ -31,27 +57,60 @@
   <label><input id="hide-worked" type="checkbox"> Hide already-worked</label>
   <span>WSJT-X UDP port {{ udp_port }}</span>
 </div>
+
+<div class="scope-bar">
+  <span>Worked/confirmed match:</span>
+  <label><input id="scope-band" type="checkbox" checked> Band</label>
+  <label><input id="scope-mode" type="checkbox"> Mode</label>
+  <span class="legend">
+    <span><span class="swatch sw-confirmed"></span>Confirmed (LoTW)</span>
+    <span><span class="swatch sw-worked"></span>Worked, not confirmed</span>
+    <span><span class="swatch sw-none"></span>No contact</span>
+  </span>
+  <span style="margin-left:auto; color:#888;">Double-click a row to call that station in WSJT-X</span>
+</div>
+
 <div id="live-status">No WSJT-X status received yet -- check WSJT-X Settings / Reporting / UDP Server is enabled and pointed at 127.0.0.1:{{ udp_port }}.</div>
 
-<table class="live-table">
-  <thead>
-    <tr>
-      <th>Time</th><th>Band</th><th>Mode</th><th>SNR</th><th>Call</th><th>Grid</th><th>DXCC</th><th>Message</th><th>Flags</th>
-    </tr>
-  </thead>
-  <tbody id="live-body"></tbody>
-</table>
+<div class="live-panels">
+  <div class="live-panel">
+    <h2>CQs</h2>
+    <div class="live-panel-scroll">
+      <table class="live-table">
+        <thead>
+          <tr><th>Time</th><th>Band</th><th>Mode</th><th>SNR</th><th>Call</th><th>Grid</th><th>DXCC</th><th>Message</th><th>Flags</th></tr>
+        </thead>
+        <tbody id="cq-body"></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="live-panel">
+    <h2>Non-CQs</h2>
+    <div class="live-panel-scroll">
+      <table class="live-table">
+        <thead>
+          <tr><th>Time</th><th>Band</th><th>Mode</th><th>SNR</th><th>Call</th><th>Grid</th><th>DXCC</th><th>Message</th><th>Flags</th></tr>
+        </thead>
+        <tbody id="noncq-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
 
 <script>
 (function () {
-  const body = document.getElementById('live-body');
+  const cqBody = document.getElementById('cq-body');
+  const nonCqBody = document.getElementById('noncq-body');
   const dot = document.getElementById('conn-dot');
   const connText = document.getElementById('conn-text');
   const statusLine = document.getElementById('live-status');
   const cqFilterBox = document.getElementById('cq-filter');
   const hideWorkedBox = document.getElementById('hide-worked');
   const myCallBox = document.getElementById('my-call');
+  const scopeBandBox = document.getElementById('scope-band');
+  const scopeModeBox = document.getElementById('scope-mode');
   const MAX_ROWS = 300;
+  let currentWs = null;
 
   function fmtTime(ms) {
     if (ms === null || ms === undefined) return '';
@@ -62,7 +121,35 @@
     return `${h}:${m}:${s}`;
   }
 
+  function scopeKey() {
+    if (scopeBandBox.checked && scopeModeBox.checked) return 'band_mode';
+    if (scopeBandBox.checked) return 'band';
+    if (scopeModeBox.checked) return 'mode';
+    return 'overall';
+  }
+
+  function statusClass(status) {
+    return 'status-' + (status || 'unknown');
+  }
+
+  function applyStatusColors(tr, ev) {
+    const key = scopeKey();
+    const callCell = tr.querySelector('.col-call');
+    const gridCell = tr.querySelector('.col-grid');
+    const dxccCell = tr.querySelector('.col-dxcc');
+    if (callCell) callCell.className = 'col-call ' + statusClass(ev.call_status && ev.call_status[key]);
+    if (gridCell) gridCell.className = 'col-grid ' + statusClass(ev.grid_status && ev.grid_status[key]);
+    if (dxccCell) dxccCell.className = 'col-dxcc ' + statusClass(ev.entity_status && ev.entity_status[key]);
+  }
+
+  function sendReply(ev) {
+    if (!currentWs || currentWs.readyState !== WebSocket.OPEN) return;
+    currentWs.send(JSON.stringify({ action: 'reply', event: ev }));
+    statusLine.textContent = 'Calling ' + (ev.call || '') + ' in WSJT-X...';
+  }
+
   function renderDecode(ev) {
+    const body = ev.is_cq ? cqBody : nonCqBody;
     const tr = document.createElement('tr');
     const classes = [];
     if (ev.cq_area_mismatch) classes.push('row-cq-mismatch');
@@ -84,14 +171,33 @@
       <td>${ev.band || ''}</td>
       <td>${ev.mode || ''}</td>
       <td>${ev.snr ?? ''}</td>
-      <td>${ev.call || ''}</td>
-      <td>${ev.grid || ''}</td>
-      <td>${ev.dxcc_name || ''}</td>
+      <td class="col-call">${ev.call || ''}</td>
+      <td class="col-grid">${ev.grid || ''}</td>
+      <td class="col-dxcc">${ev.dxcc_name || ''}</td>
       <td>${ev.message || ''}</td>
       <td>${tags.join('')}</td>
     `;
+    applyStatusColors(tr, ev);
+    tr.title = 'Double-click to call ' + (ev.call || 'this station') + ' in WSJT-X';
+    tr.addEventListener('dblclick', () => {
+      tr.classList.add('row-flash');
+      setTimeout(() => tr.classList.remove('row-flash'), 600);
+      sendReply(ev);
+    });
+
     body.prepend(tr);
     while (body.children.length > MAX_ROWS) body.removeChild(body.lastChild);
+  }
+
+  function recolorAllRows() {
+    // Cheap: there's no stored event list, so a scope change just leaves
+    // already-rendered rows as-is until new decodes arrive. Re-render from
+    // history instead, which we already have server-side.
+    fetch('/live/history').then(r => r.json()).then(events => {
+      cqBody.innerHTML = '';
+      nonCqBody.innerHTML = '';
+      events.forEach(ev => { if (ev.kind === 'decode') renderDecode(ev); });
+    }).catch(() => {});
   }
 
   function renderStatus(ev) {
@@ -106,6 +212,7 @@
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
     const ws = new WebSocket(proto + location.host + '/live/ws');
+    currentWs = ws;
     ws.onopen = () => { dot.className = 'up'; connText.textContent = 'connected'; };
     ws.onclose = () => { dot.className = 'down'; connText.textContent = 'disconnected -- retrying...'; setTimeout(connect, 2000); };
     ws.onerror = () => ws.close();
@@ -115,6 +222,7 @@
       if (ev.kind === 'decode') renderDecode(ev);
       else if (ev.kind === 'status') renderStatus(ev);
       else if (ev.kind === 'qso_logged') statusLine.textContent = 'Logged: ' + (ev.dx_call || '');
+      else if (ev.kind === 'clear') { cqBody.innerHTML = ''; nonCqBody.innerHTML = ''; }
     };
   }
 
@@ -127,6 +235,8 @@
   }
   cqFilterBox.addEventListener('change', pushConfig);
   myCallBox.addEventListener('change', pushConfig);
+  scopeBandBox.addEventListener('change', recolorAllRows);
+  scopeModeBox.addEventListener('change', recolorAllRows);
 
   connect();
 })();

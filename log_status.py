@@ -22,6 +22,7 @@ v008 layout macloggerdx_awards.py was written against (e.g. no `state` or
 
 from __future__ import annotations
 
+import collections
 import dataclasses
 import logging
 import sqlite3
@@ -34,14 +35,88 @@ log = logging.getLogger("log_status")
 CONFIRMED_LIKE = "(qsl_received LIKE '%LoTW%' OR qsl_received LIKE '%eQSL%' OR qsl_received LIKE '%CardC%' OR qsl_received LIKE '%Card%')"
 
 
+def _is_lotw(qsl_received: Optional[str]) -> bool:
+    """Strict LoTW-only confirmation check, for the Live Monitor's
+    green/orange/red colouring (as distinct from CONFIRMED_LIKE, which the
+    rest of the app treats as LoTW/eQSL/card all being equally 'confirmed')."""
+    return bool(qsl_received) and "LOTW" in qsl_received.upper()
+
+
+def _empty_scoped_index() -> dict:
+    return {
+        "worked": {"overall": set(), "band": collections.defaultdict(set),
+                   "mode": collections.defaultdict(set), "band_mode": collections.defaultdict(set)},
+        "confirmed": {"overall": set(), "band": collections.defaultdict(set),
+                      "mode": collections.defaultdict(set), "band_mode": collections.defaultdict(set)},
+    }
+
+
+def _build_scoped_index(rows) -> dict:
+    """rows: iterable of (key, band, mode, qsl_received) covering every QSO
+    for some attribute (DXCC id, 4-char grid, ...). Classifies each row into
+    the overall/band/mode/band+mode 'worked' and (LoTW-)'confirmed' buckets
+    it belongs to, so a single bulk query can answer all four scope
+    combinations without re-querying the database on checkbox toggle."""
+    idx = _empty_scoped_index()
+    for key, band, mode, qsl_received in rows:
+        if key is None:
+            continue
+        confirmed = _is_lotw(qsl_received)
+        idx["worked"]["overall"].add(key)
+        if confirmed:
+            idx["confirmed"]["overall"].add(key)
+        if band:
+            idx["worked"]["band"][band].add(key)
+            if confirmed:
+                idx["confirmed"]["band"][band].add(key)
+        if mode:
+            idx["worked"]["mode"][mode].add(key)
+            if confirmed:
+                idx["confirmed"]["mode"][mode].add(key)
+        if band and mode:
+            idx["worked"]["band_mode"][(band, mode)].add(key)
+            if confirmed:
+                idx["confirmed"]["band_mode"][(band, mode)].add(key)
+    return idx
+
+
+def _scoped_status(idx: dict, key, band: Optional[str], mode: Optional[str], use_band: bool, use_mode: bool) -> str:
+    """One of 'confirmed' / 'worked' / 'none' / 'unknown' -- 'unknown' when
+    the requested scope needs a band or mode we don't have for this decode."""
+    if key is None:
+        return "unknown"
+    if use_band and use_mode:
+        bucket, sub = ("band_mode", (band, mode)) if (band and mode) else (None, None)
+    elif use_band:
+        bucket, sub = ("band", band) if band else (None, None)
+    elif use_mode:
+        bucket, sub = ("mode", mode) if mode else (None, None)
+    else:
+        bucket, sub = "overall", None
+    if bucket is None:
+        return "unknown"
+    confirmed_set = idx["confirmed"]["overall"] if bucket == "overall" else idx["confirmed"][bucket][sub]
+    worked_set = idx["worked"]["overall"] if bucket == "overall" else idx["worked"][bucket][sub]
+    if key in confirmed_set:
+        return "confirmed"
+    if key in worked_set:
+        return "worked"
+    return "none"
+
+
 @dataclasses.dataclass
 class CallStatus:
     callsign: str
     worked_before: bool = False
     worked_this_band: bool = False
     worked_this_mode: bool = False
+    worked_this_band_and_mode: bool = False
     confirmed_ever: bool = False
     confirmed_this_band: bool = False
+    confirmed_lotw_ever: bool = False
+    confirmed_lotw_this_band: bool = False
+    confirmed_lotw_this_mode: bool = False
+    confirmed_lotw_band_and_mode: bool = False
     qso_count: int = 0
     last_worked: Optional[str] = None
     dxcc_country: Optional[str] = None
@@ -49,6 +124,31 @@ class CallStatus:
     cq_zone: Optional[str] = None
     grids_worked: Optional[list] = None
     error: Optional[str] = None
+
+    def status_for_scope(self, use_band: bool, use_mode: bool) -> str:
+        """One of 'confirmed' / 'worked' / 'none', for the given band/mode
+        scope -- used to colour the Call cell in the Live Monitor table."""
+        if use_band and use_mode:
+            worked, confirmed = self.worked_this_band_and_mode, self.confirmed_lotw_band_and_mode
+        elif use_band:
+            worked, confirmed = self.worked_this_band, self.confirmed_lotw_this_band
+        elif use_mode:
+            worked, confirmed = self.worked_this_mode, self.confirmed_lotw_this_mode
+        else:
+            worked, confirmed = self.worked_before, self.confirmed_lotw_ever
+        if confirmed:
+            return "confirmed"
+        if worked:
+            return "worked"
+        return "none"
+
+    def status_all_scopes(self) -> dict:
+        return {
+            "overall": self.status_for_scope(False, False),
+            "band": self.status_for_scope(True, False),
+            "mode": self.status_for_scope(False, True),
+            "band_mode": self.status_for_scope(True, True),
+        }
 
 
 class LogStatusChecker:
@@ -68,6 +168,11 @@ class LogStatusChecker:
         self.worked_grids4: set = set()
         self.worked_calls: set = set()
         self.last_refresh: Optional[float] = None
+
+        # Band/mode-scoped worked + LoTW-confirmed sets, for the Live
+        # Monitor's per-band/per-mode colour-coding toggle.
+        self._dxcc_scoped: dict = _empty_scoped_index()
+        self._grid4_scoped: dict = _empty_scoped_index()
 
     # -- connection handling -------------------------------------------------
 
@@ -125,12 +230,47 @@ class LogStatusChecker:
             if self.has_column("call"):
                 rows = self._execute(f"SELECT DISTINCT call FROM {self.qso_table} WHERE call IS NOT NULL")
                 self.worked_calls = {r[0].upper() for r in rows if r[0]}
+
+            band_col = "band_rx" if self.has_column("band_rx") else "NULL"
+            mode_col = "mode" if self.has_column("mode") else "NULL"
+            qsl_col = "qsl_received" if self.has_column("qsl_received") else "NULL"
+
+            if self.has_column("dxcc_id"):
+                rows = self._execute(
+                    f"SELECT dxcc_id, {band_col}, {mode_col}, {qsl_col} FROM {self.qso_table} WHERE dxcc_id IS NOT NULL"
+                )
+                self._dxcc_scoped = _build_scoped_index(rows)
+            if self.has_column("grid"):
+                rows = self._execute(
+                    f"SELECT substr(grid,1,4), {band_col}, {mode_col}, {qsl_col} FROM {self.qso_table} "
+                    f"WHERE grid IS NOT NULL AND length(grid) >= 4"
+                )
+                rows = [(g.upper() if g else None, b, m, q) for g, b, m, q in rows]
+                self._grid4_scoped = _build_scoped_index(rows)
+
             self.last_refresh = time.time()
             log.info("Refreshed worked-before caches in %.2fs (%d DXCC, %d zones, %d grids, %d calls)",
                       time.time() - t0, len(self.worked_dxcc_ids), len(self.worked_cq_zones),
                       len(self.worked_grids4), len(self.worked_calls))
         except Exception:
             log.exception("Failed to refresh worked-before caches")
+
+    def entity_status_all_scopes(self, dxcc_id: Optional[int], band: Optional[str], mode: Optional[str]) -> dict:
+        return {
+            "overall": _scoped_status(self._dxcc_scoped, dxcc_id, band, mode, False, False),
+            "band": _scoped_status(self._dxcc_scoped, dxcc_id, band, mode, True, False),
+            "mode": _scoped_status(self._dxcc_scoped, dxcc_id, band, mode, False, True),
+            "band_mode": _scoped_status(self._dxcc_scoped, dxcc_id, band, mode, True, True),
+        }
+
+    def grid_status_all_scopes(self, grid: Optional[str], band: Optional[str], mode: Optional[str]) -> dict:
+        key = grid[:4].upper() if grid and len(grid) >= 4 else None
+        return {
+            "overall": _scoped_status(self._grid4_scoped, key, band, mode, False, False),
+            "band": _scoped_status(self._grid4_scoped, key, band, mode, True, False),
+            "mode": _scoped_status(self._grid4_scoped, key, band, mode, False, True),
+            "band_mode": _scoped_status(self._grid4_scoped, key, band, mode, True, True),
+        }
 
     def is_new_dxcc(self, dxcc_id: Optional[int]) -> Optional[bool]:
         if dxcc_id is None or not self.has_column("dxcc_id"):
@@ -193,6 +333,10 @@ class LogStatusChecker:
             status.worked_this_band = any(r.get("band_rx") == band for r in row_dicts)
         if mode and "mode" in select_cols:
             status.worked_this_mode = any(r.get("mode") == mode for r in row_dicts)
+        if band and mode and "band_rx" in select_cols and "mode" in select_cols:
+            status.worked_this_band_and_mode = any(
+                r.get("band_rx") == band and r.get("mode") == mode for r in row_dicts
+            )
         if "qsl_received" in select_cols:
             def _confirmed(qsl):
                 if not qsl:
@@ -200,9 +344,22 @@ class LogStatusChecker:
                 qsl_u = qsl.upper()
                 return any(tag in qsl_u for tag in ("LOTW", "EQSL", "CARD"))
             status.confirmed_ever = any(_confirmed(r.get("qsl_received")) for r in row_dicts)
+            status.confirmed_lotw_ever = any(_is_lotw(r.get("qsl_received")) for r in row_dicts)
             if band:
                 status.confirmed_this_band = any(
                     r.get("band_rx") == band and _confirmed(r.get("qsl_received")) for r in row_dicts
+                )
+                status.confirmed_lotw_this_band = any(
+                    r.get("band_rx") == band and _is_lotw(r.get("qsl_received")) for r in row_dicts
+                )
+            if mode:
+                status.confirmed_lotw_this_mode = any(
+                    r.get("mode") == mode and _is_lotw(r.get("qsl_received")) for r in row_dicts
+                )
+            if band and mode:
+                status.confirmed_lotw_band_and_mode = any(
+                    r.get("band_rx") == band and r.get("mode") == mode and _is_lotw(r.get("qsl_received"))
+                    for r in row_dicts
                 )
 
         return status

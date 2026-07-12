@@ -77,6 +77,25 @@ def _strip_suffixes(call: str) -> str:
     return call
 
 
+def _resolve_call_token(tok: Optional[str]) -> tuple:
+    """WSJT-X wraps a callsign in "<...>" when it's sent via the compressed/
+    hashed-callsign slot of the message. If the bracketed content is exactly
+    "..." the callsign genuinely couldn't be resolved (unknown); otherwise
+    the brackets just mark *how* it was sent, and the enclosed text (e.g.
+    "<V4/SP9FIH>", "<BV400>") is a real, already-decoded callsign that
+    should be treated like any other token, brackets stripped.
+
+    Returns (callsign_or_None, was_unresolved_hash).
+    """
+    if tok is None:
+        return None, False
+    if tok == "<...>":
+        return None, True
+    if len(tok) >= 2 and tok[0] == "<" and tok[-1] == ">":
+        return tok[1:-1], False
+    return tok, False
+
+
 def parse_message(raw: str) -> ParsedMessage:
     text = (raw or "").strip()
     result = ParsedMessage(raw=text)
@@ -85,8 +104,6 @@ def parse_message(raw: str) -> ParsedMessage:
 
     tokens = text.split()
 
-    # Strip a trailing lone "<...>" style hash marker some clients append; the
-    # real hashed-call case is when a token itself is exactly "<...>".
     if tokens and tokens[0] == "CQ":
         result.is_cq = True
         rest = tokens[1:]
@@ -102,10 +119,7 @@ def parse_message(raw: str) -> ParsedMessage:
             # "CQ <CALL>" with no grid
             call_tok, grid_tok = rest[0], None
 
-        if call_tok == "<...>":
-            result.hashed = True
-        else:
-            result.de_call = call_tok
+        result.de_call, result.hashed = _resolve_call_token(call_tok)
         if grid_tok and GRID_RE.match(grid_tok):
             result.grid = grid_tok
         result.call_area = _call_area_digit(result.de_call) if result.de_call else None
@@ -115,11 +129,9 @@ def parse_message(raw: str) -> ParsedMessage:
     # Non-CQ: "<TO> <DE> [<GRID>|<REPORT>|RRR|RR73|73]"
     if len(tokens) >= 2:
         to_tok, de_tok = tokens[0], tokens[1]
-        result.to_call = None if to_tok == "<...>" else to_tok
-        if de_tok == "<...>":
-            result.hashed = True
-        else:
-            result.de_call = de_tok
+        result.to_call, hashed_to = _resolve_call_token(to_tok)
+        result.de_call, hashed_de = _resolve_call_token(de_tok)
+        result.hashed = hashed_to or hashed_de
 
         if len(tokens) >= 3:
             tail = tokens[2]

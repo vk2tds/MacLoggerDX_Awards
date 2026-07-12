@@ -91,18 +91,26 @@ def _expand_prefix_field(field: str) -> list:
         if "-" in tok:
             lo, _, hi = tok.partition("-")
             lo, hi = lo.strip(), hi.strip()
-            # Nested call-area range like "UI1-7" or "1-7" alone -- not a
-            # simple alphabetic range, treat conservatively as a literal
-            # prefix (the alphabetic part only).
-            if hi and hi[0].isdigit() and not lo[-1:].isdigit():
-                tokens.append(("literal", lo))
-                prev_stem = lo
+            # Shorthand range where hi is just the trailing character(s) of
+            # lo, e.g. "H6-7" (Nicaragua: H6..H7) or "9M2-4" (H6, H7) -- hi
+            # replaces the trailing characters of lo, same idea as the
+            # comma continuation-shorthand below but written with a dash.
+            if hi and lo and len(hi) < len(lo) and hi.isalnum():
+                hi_full = lo[: -len(hi)] + hi
+                tokens.append(("range", lo.upper(), hi_full.upper()))
+                prev_stem = lo[: -len(hi)]
                 continue
-            if len(lo) == len(hi) and lo.isalpha() and hi.isalpha():
+            # Equal-length alphanumeric range, e.g. "AA-AK" (pure alpha) or
+            # "7J-7N" / "5C-5G" (digit-prefixed call-area ranges like Japan
+            # or Morocco) -- both ends vary only in the trailing letter(s).
+            if lo and hi and len(lo) == len(hi) and lo.isalnum() and hi.isalnum():
                 tokens.append(("range", lo.upper(), hi.upper()))
                 prev_stem = lo[:-1]
                 continue
-            # Fallback: treat both ends as literals.
+            # Anything else (nested/irregular notation like "UI1-7" embedded
+            # in "UA-UI1-7", or differing-length compound prefixes like
+            # "PP0-PY0F") is genuinely ambiguous -- treat conservatively as
+            # two literal prefixes rather than guessing a range.
             tokens.append(("literal", lo))
             tokens.append(("literal", hi))
             prev_stem = lo

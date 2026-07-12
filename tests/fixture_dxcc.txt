@@ -17,6 +17,7 @@ Notes:
     VK9#               Cocos (Keeling) Is.                OC    54    29    038
     9M2,4(8)           West Malaysia                      AS    54    28    299
     9M6,8(8)           East Malaysia                      OC    54    28    046
+    YN,H6-7,HT#        Nicaragua                          NA    11    07    086
 
     NOTES:
     1    Unofficial prefix.

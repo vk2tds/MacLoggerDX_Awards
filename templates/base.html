@@ -11,12 +11,14 @@
   <a href="{{ url_for('awards_view') }}">Award Statuses</a>
   <a href="{{ url_for('dxcc_view') }}">DXCC Status</a>
   <a href="{{ url_for('live.live_view') }}">Live Monitor</a>
+  <a href="{{ url_for('qsl.qsl_view') }}">QSL Helper</a>
   <form class="refresh-form" method="post" action="{{ url_for('refresh_view') }}">
     <button type="submit">Refresh</button>
   </form>
   {% if last_refreshed %}
     <span class="refreshed">Last refreshed {{ last_refreshed.strftime('%Y-%m-%d %H:%M:%S') }}</span>
   {% endif %}
+  <span class="version">v{{ app_version }}</span>
 </nav>
 {% with messages = get_flashed_messages() %}
   {% if messages %}

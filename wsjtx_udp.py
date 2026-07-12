@@ -409,6 +409,42 @@ def build_decode(
     return b"".join(parts)
 
 
+def build_reply(
+    client_id: str,
+    time_ms: int,
+    snr: int,
+    delta_time_s: float,
+    delta_freq_hz: int,
+    mode: str,
+    message: str,
+    low_confidence: bool = False,
+    modifiers: int = 0,
+) -> bytes:
+    """
+    Build a Reply (4) message -- this is what WSJT-X does internally when
+    you double-click a decoded line in its own Band Activity/Rx Frequency
+    window, telling it to start calling that station. The fields mirror a
+    Decode message plus a trailing quint8 for keyboard modifiers (0 == plain
+    double-click, no Ctrl/Shift).
+
+    `client_id` must match the "id" WSJT-X used on the message we're
+    replying to (its Settings/Reporting "Unique application identifier",
+    "WSJT-X" by default) -- WSJT-X ignores Reply messages addressed to a
+    different id.
+    """
+    parts = []
+    _pack_header(parts, client_id, MSG_REPLY)
+    parts.append(struct.pack(">I", time_ms))
+    parts.append(struct.pack(">i", snr))
+    parts.append(struct.pack(">d", delta_time_s))
+    parts.append(struct.pack(">I", delta_freq_hz))
+    _write_qstring(parts, mode)
+    _write_qstring(parts, message)
+    parts.append(struct.pack(">B", 1 if low_confidence else 0))
+    parts.append(struct.pack(">B", modifiers))
+    return b"".join(parts)
+
+
 def build_highlight_callsign(
     client_id: str,
     callsign: str,

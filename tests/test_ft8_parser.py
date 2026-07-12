@@ -69,6 +69,22 @@ def test_hashed_call():
     assert p.de_call is None
 
 
+def test_hashed_but_resolved_call_strips_brackets():
+    # WSJT-X wraps a callsign in "<...>" when it went through the
+    # compressed/hashed-callsign message slot -- unlike the literal "<...>"
+    # placeholder, this brackets a real, already-decoded callsign and
+    # should be treated exactly like a plain token, brackets stripped.
+    p = parse_message("<V4/SP9FIH> VK2TDS QF55")
+    assert p.to_call == "V4/SP9FIH"
+    assert p.de_call == "VK2TDS"
+    assert not p.hashed
+
+    p2 = parse_message("VK2TDS <BV400> -21")
+    assert p2.to_call == "VK2TDS"
+    assert p2.de_call == "BV400"
+    assert not p2.hashed
+
+
 def test_empty_message_does_not_raise():
     p = parse_message("")
     assert p.raw == ""

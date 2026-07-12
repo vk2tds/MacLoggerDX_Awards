@@ -40,6 +40,7 @@ def run_simple_module(modname):
 run_simple_module("test_wsjtx_udp")
 run_simple_module("test_ft8_parser")
 run_simple_module("test_dxcc_lookup")
+run_simple_module("test_qsl_helper")
 
 # -- test_log_status.py, with hand-rolled fixtures --
 import test_log_status as tls  # noqa: E402
