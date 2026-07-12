@@ -22,21 +22,16 @@
 import sqlite3
 import logging
 import logging.handlers
-import pprint
 import sys
-import re 
+import re
 import os
 import urllib.request
 import datetime
 import json
-from dicttoxml import dicttoxml
-from xml.dom.minidom import parseString
 from collections import OrderedDict
 import tabulate
 from dateutil import parser
 import numpy as np
-
-
 
 
 # Change root logger level from WARNING (default) to NOTSET in order for all messages to be delegated.
@@ -48,11 +43,7 @@ console.setLevel(logging.INFO)
 formater = logging.Formatter('%(name)-13s: %(levelname)-8s %(message)s')
 console.setFormatter(formater)
 logging.getLogger().addHandler(console)
-logging.getLogger("dicttoxml").setLevel(logging.WARNING)
 log = logging.getLogger("app." + __name__)
-
-pp = pprint.PrettyPrinter(indent=4)
-
 
 
 
@@ -194,8 +185,8 @@ class analysis():
                 else:
                     split = data_line.fullmatch(line)
                     if not split:
-                        if "Spratly Is." in line:
-                            pass # This is messy. Don't care about it.
+                        if "Spratly Is." in line or "and Northern Ireland" in line:
+                            pass # Wrapped continuation lines for entity names too long for the column. Don't care about it.
                         else:
                             raise RuntimeError("Ooops. Code is broken, cannot handle: \"{}\".".format(line))
                     else:
@@ -290,7 +281,6 @@ class analysis():
                     r = datetime.datetime.strptime (rx_3, date_format)
                     delta = r-t
                     ds.append (delta.days)
-                #print (tx_2, rx_3, delta.days)
         self.awards['STATS']['STATS_LOTWSTATS']['Mean'] = np.mean(ds)
         self.awards['STATS']['STATS_LOTWSTATS']['Median'] = np.median(ds)
         self.awards['STATS']['STATS_LOTWSTATS']['StandardDeviation'] = np.std(ds)
@@ -300,16 +290,9 @@ class analysis():
             if bin > len(bins)-1:
                 bin = len(bins)-1
             bins[bin] += 1
-        
-        print (bins)
+        self.awards['STATS']['STATS_LOTWSTATS']['HistogramDays'] = bins
 
-
-
-
-        print (self.awards['STATS']['STATS_LOTWSTATS'])
-
-
-
+        log.debug (self.awards['STATS']['STATS_LOTWSTATS'])
 
     def doSTATS_GRIDS (self):
         # https://www.amsat.org/amsat/articles/houston-net/grids.html
@@ -1114,14 +1097,9 @@ class analysis():
 
 
     def start(self):
-        global continents
-        global table
-        global rawtable
-
-        #self.doINIT()
         self.doDatabase()
         self.doINIT_Awards()
-        self.continents = self.doGetDXCC_Continent() 
+        self.continents = self.doGetDXCC_Continent()
 
         self.doAWARDS_DXCC()
         self.doAWARDS_CQWAZ()
@@ -1131,14 +1109,6 @@ class analysis():
         self.doAWARDS_WIA()
         self.doSTATS()
 
-
-        # # Does not view well in Safari
-        # xml = dicttoxml(awards)
-        # f=open ("demofile2.xml", "w")
-        # f.write (parseString(xml).toprettyxml())
-        # f.close()
-
-
         self.table = self.awards['ARRL']['DXCC']['Table']
         self.rawtable = self.awards['ARRL']['DXCC']['RawTable']
 
@@ -1146,34 +1116,7 @@ class analysis():
         self.awards['ARRL']['DXCC'].pop('RawTable')
 
 
-
-#print (awards)
 analysis = analysis()
 
 if __name__ == "__main__":
     analysis.start()
-    #pp.pprint (awards)
-    
-    
-    # print (awards['ARRL']['DXCC']['Table'])
-
-    #pp.pprint (awards['NZART'])
-
-    #j = json.dumps(awards, indent = 8)
-    #print (j)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Award Statuses{% endblock %}
+{% block content %}
+<h1>Award Statuses</h1>
+
+{% macro render_node(node) %}
+  <details class="tree-node" open>
+    <summary>
+      <span class="node-label">{{ node.label }}</span>
+      {% if node.badge %}
+        <span class="badge badge-{{ node.badge.level }}">{{ node.badge.text }}</span>
+      {% endif %}
+    </summary>
+    <div class="tree-children">
+      {% if node.leaves %}
+        <ul class="leaves">
+          {% for k, v in node.leaves %}
+            <li><span class="leaf-key">{{ k }}:</span> {{ v }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+      {% if node.list_values %}
+        <ul class="leaves">
+          {% for item in node.list_values %}
+            <li>{{ item }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+      {% if node.children %}
+        {% for child in node.children %}
+          {{ render_node(child) }}
+        {% endfor %}
+      {% endif %}
+    </div>
+  </details>
+{% endmacro %}
+
+<div class="tree-root">
+  {% for node in tree %}
+    {{ render_node(node) }}
+  {% endfor %}
+</div>
+{% endblock %}

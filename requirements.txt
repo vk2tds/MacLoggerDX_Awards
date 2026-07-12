@@ -1,0 +1,4 @@
+Flask
+numpy
+tabulate
+python-dateutil

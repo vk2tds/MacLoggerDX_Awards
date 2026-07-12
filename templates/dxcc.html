@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}DXCC Status{% endblock %}
+{% block content %}
+<h1>DXCC Challenge Status</h1>
+
+<table class="stats-table">
+  <tr><td>DXCC Count Confirmed</td><td>{{ challenge.stats.dxcc_confirmed }}</td></tr>
+  <tr><td>DXCC Count With Unconfirmed</td><td>{{ challenge.stats.dxcc_with_unconfirmed }}</td></tr>
+  <tr><td>DXCC Challenge Count Confirmed</td><td>{{ challenge.stats.challenge_confirmed }}</td></tr>
+  <tr><td>DXCC Challenge Count With Unconfirmed</td><td>{{ challenge.stats.challenge_with_unconfirmed }}</td></tr>
+</table>
+
+<h2>Legend</h2>
+<table class="legend-table">
+  <tr>
+    {% for status in challenge.legend %}
+      <td style="background-color: {{ status.color }};">{{ status.label }}</td>
+    {% endfor %}
+  </tr>
+  <tr>
+    {% for status in challenge.legend %}
+      <td>{{ challenge.categories.get(status.name, 0) }}</td>
+    {% endfor %}
+  </tr>
+</table>
+
+{% if challenge.stale_tracking %}
+<h2>Tracking entries to review</h2>
+<p>These entries in <code>qsl_tracking.json</code> are either already confirmed (safe to delete) or
+don't match any outstanding DXCC/band cell (check for a typo in the country or band name).</p>
+<table class="stale-table">
+  <tr><th>Type</th><th>Subtype</th><th>Country</th><th>Band</th><th>Call</th><th>Notes</th></tr>
+  {% for e in challenge.stale_tracking %}
+  <tr>
+    <td>{{ e.type }}</td><td>{{ e.subtype }}</td><td>{{ e.country }}</td>
+    <td>{{ e.band }}</td><td>{{ e.call }}</td><td>{{ e.notes }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+<h2>Challenge Grid</h2>
+<div class="grid-scroll">
+<table class="challenge-grid">
+  <tr>
+    <th>Country</th>
+    {% for h in challenge.headers %}<th>{{ h }}</th>{% endfor %}
+  </tr>
+  {% for row in challenge.rows %}
+  <tr>
+    <td class="country-cell">{{ row.country }}</td>
+    {% for cell in row.cells %}
+      <td style="background-color: {{ cell.status.color }};">
+        {% if cell.tooltip %}
+          <span class="tooltip">{{ cell.text }}<span class="tooltiptext">{{ cell.tooltip | safe }}</span></span>
+        {% else %}
+          {{ cell.text }}
+        {% endif %}
+      </td>
+    {% endfor %}
+  </tr>
+  {% endfor %}
+</table>
+</div>
+{% endblock %}

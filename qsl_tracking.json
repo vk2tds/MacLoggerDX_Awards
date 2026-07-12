@@ -1,0 +1,290 @@
+[
+  {
+    "type": "OQRS",
+    "subtype": "Sent",
+    "country": "Marshall Islands",
+    "band": "15M",
+    "call": "V7/N7XR",
+    "notes": ""
+  },
+  {
+    "type": "OQRS",
+    "subtype": "Sent",
+    "country": "Marshall Islands",
+    "band": "17M",
+    "call": "V7/N7XR",
+    "notes": ""
+  },
+  {
+    "type": "OQRS",
+    "subtype": "Sent",
+    "country": "Malawi",
+    "band": "15M",
+    "call": "7Q7EMH",
+    "notes": ""
+  },
+  {
+    "type": "OQRS",
+    "subtype": "Outbox",
+    "country": "Micronesia",
+    "band": "15M",
+    "call": "V63WJR",
+    "notes": "Anything September"
+  },
+  {
+    "type": "OQRS",
+    "subtype": "Sent",
+    "country": "Malawi",
+    "band": "20M",
+    "call": "7Q7EMH",
+    "notes": ""
+  },
+  {
+    "type": "OQRS",
+    "subtype": "Sent",
+    "country": "Belarus",
+    "band": "12M",
+    "call": "EW8W",
+    "notes": ""
+  },
+  {
+    "type": "OQRS",
+    "subtype": "Sent",
+    "country": "Belarus",
+    "band": "30M",
+    "call": "EW8W",
+    "notes": ""
+  },
+  {
+    "type": "OQRS",
+    "subtype": "Sent",
+    "country": "Viet Nam",
+    "band": "15M",
+    "call": "XV1X",
+    "notes": ""
+  },
+  {
+    "type": "OQRS",
+    "subtype": "Sent",
+    "country": "Viet Nam",
+    "band": "30M",
+    "call": "3W1T",
+    "notes": ""
+  },
+  {
+    "type": "OQRS",
+    "subtype": "Sent",
+    "country": "North Cook Islands",
+    "band": "17M",
+    "call": "E51WL",
+    "notes": "4/jun/2023"
+  },
+  {
+    "type": "OQRS",
+    "subtype": "Sent",
+    "country": "India",
+    "band": "10M",
+    "call": "VU2GRM",
+    "notes": ""
+  },
+  {
+    "type": "QSL",
+    "subtype": "Outbox",
+    "country": "Malta",
+    "band": "17M",
+    "call": "9H1ET",
+    "notes": "x2"
+  },
+  {
+    "type": "QSL",
+    "subtype": "Outbox",
+    "country": "Solomon Islands",
+    "band": "40M",
+    "call": "H44MS",
+    "notes": ""
+  },
+  {
+    "type": "QSL",
+    "subtype": "Outbox",
+    "country": "Gibraltar",
+    "band": "15M",
+    "call": "ZB2R",
+    "notes": "Direct only"
+  },
+  {
+    "type": "QSL",
+    "subtype": "Outbox",
+    "country": "Venezuela",
+    "band": "10M",
+    "call": "YV5DR",
+    "notes": ""
+  },
+  {
+    "type": "QSL",
+    "subtype": "Outbox",
+    "country": "Latvia",
+    "band": "12M",
+    "call": "YL3CW",
+    "notes": ""
+  },
+  {
+    "type": "QSL",
+    "subtype": "Outbox",
+    "country": "Cyprus",
+    "band": "15M",
+    "call": "5B4AJG",
+    "notes": ""
+  },
+  {
+    "type": "QSL",
+    "subtype": "Outbox",
+    "country": "Ceuta & Melilla",
+    "band": "15M",
+    "call": "EA9PD",
+    "notes": "US$3 - emailed about LoTW"
+  },
+  {
+    "type": "QSL",
+    "subtype": "Outbox",
+    "country": "Brunei Darussalam",
+    "band": "15M",
+    "call": "V85T",
+    "notes": ""
+  },
+  {
+    "type": "QSL",
+    "subtype": "Outbox",
+    "country": "Azores",
+    "band": "17M",
+    "call": "CU7AA",
+    "notes": ""
+  },
+  {
+    "type": "QSL",
+    "subtype": "Outbox",
+    "country": "Balearic Islands",
+    "band": "17M",
+    "call": "EA6SA",
+    "notes": ""
+  },
+  {
+    "type": "QSL",
+    "subtype": "Outbox",
+    "country": "Venezuela",
+    "band": "12M",
+    "call": "YV2AVT",
+    "notes": ""
+  },
+  {
+    "type": "QSL",
+    "subtype": "Outbox",
+    "country": "Lithuania",
+    "band": "17M",
+    "call": "LY3BES",
+    "notes": ""
+  },
+  {
+    "type": "QSL",
+    "subtype": "Sent",
+    "country": "Moldova",
+    "band": "15M",
+    "call": "ER3RE",
+    "notes": "A$5 April 2023"
+  },
+  {
+    "type": "QSL",
+    "subtype": "Sent",
+    "country": "Lithuania",
+    "band": "15M",
+    "call": "LY3PW",
+    "notes": "A$5 April 2023"
+  },
+  {
+    "type": "QSL",
+    "subtype": "Sent",
+    "country": "Czech Republic",
+    "band": "15M",
+    "call": "OK1DBE",
+    "notes": "8 May 2023"
+  },
+  {
+    "type": "Bureau",
+    "subtype": "Outbox",
+    "country": "Turkey",
+    "band": "15M",
+    "call": "TC100YEAR",
+    "notes": ""
+  },
+  {
+    "type": "Bureau",
+    "subtype": "Outbox",
+    "country": "Balearic Islands",
+    "band": "30M",
+    "call": "EA6TH",
+    "notes": ""
+  },
+  {
+    "type": "Bureau",
+    "subtype": "Outbox",
+    "country": "Azores",
+    "band": "17M",
+    "call": "CU7AA",
+    "notes": ""
+  },
+  {
+    "type": "Bureau",
+    "subtype": "Outbox",
+    "country": "Croatia",
+    "band": "30M",
+    "call": "9A1CCB",
+    "notes": "Radio Club"
+  },
+  {
+    "type": "Bureau",
+    "subtype": "Outbox",
+    "country": "Latvia",
+    "band": "12M",
+    "call": "YL3CW",
+    "notes": ""
+  },
+  {
+    "type": "Bureau",
+    "subtype": "Outbox",
+    "country": "Slovak Republic",
+    "band": "20M",
+    "call": "OM3CND",
+    "notes": ""
+  },
+  {
+    "type": "Bureau",
+    "subtype": "Outbox",
+    "country": "Luxembourg",
+    "band": "30M",
+    "call": "LX1JH",
+    "notes": ""
+  },
+  {
+    "type": "Bureau",
+    "subtype": "Outbox",
+    "country": "Netherlands",
+    "band": "15M",
+    "call": "PA3ATZ",
+    "notes": ""
+  },
+  {
+    "type": "Bureau",
+    "subtype": "Outbox",
+    "country": "Venezuela",
+    "band": "10M",
+    "call": "YV5DR",
+    "notes": ""
+  },
+  {
+    "type": "Bureau",
+    "subtype": "Sent",
+    "country": "Argentina",
+    "band": "12M",
+    "call": "LU6XQB",
+    "notes": "Via OQRS"
+  }
+]
