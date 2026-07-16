@@ -149,3 +149,45 @@ def test_highlight_callsign_builds_bytes_without_error():
     assert r.u32() == w.MAGIC
     assert r.u32() == 2
     assert r.u32() == w.MSG_HIGHLIGHT_CALLSIGN
+
+
+def test_free_text_header_and_fields_roundtrip():
+    data = w.build_free_text("WSJT-X", "TNX 73 GL", send=True)
+    r = w.Reader(data)
+    assert r.u32() == w.MAGIC
+    r.u32()  # schema
+    assert r.u32() == w.MSG_FREE_TEXT
+    assert r.qstring() == "WSJT-X"
+    assert r.qstring() == "TNX 73 GL"
+    assert r.bool() is True
+
+
+def test_halt_tx_header_and_fields_roundtrip():
+    data = w.build_halt_tx("WSJT-X", auto_tx_only=True)
+    r = w.Reader(data)
+    assert r.u32() == w.MAGIC
+    r.u32()
+    assert r.u32() == w.MSG_HALT_TX
+    assert r.qstring() == "WSJT-X"
+    assert r.bool() is True
+
+
+def test_configure_header_and_fields_roundtrip():
+    data = w.build_configure(
+        "WSJT-X", mode="FT4", frequency_tolerance=20, submode=None, fast_mode=True,
+        tr_period=6, rx_df=1234, dx_call="VK2ABC", dx_grid="QF56", generate_messages=False,
+    )
+    r = w.Reader(data)
+    assert r.u32() == w.MAGIC
+    r.u32()
+    assert r.u32() == w.MSG_CONFIGURE
+    assert r.qstring() == "WSJT-X"
+    assert r.qstring() == "FT4"
+    assert r.u32() == 20
+    assert r.qstring() is None
+    assert r.bool() is True
+    assert r.u32() == 6
+    assert r.u32() == 1234
+    assert r.qstring() == "VK2ABC"
+    assert r.qstring() == "QF56"
+    assert r.bool() is False

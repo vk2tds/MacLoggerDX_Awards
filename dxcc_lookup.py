@@ -104,7 +104,27 @@ def _expand_prefix_field(field: str) -> list:
             # "7J-7N" / "5C-5G" (digit-prefixed call-area ranges like Japan
             # or Morocco) -- both ends vary only in the trailing letter(s).
             if lo and hi and len(lo) == len(hi) and lo.isalnum() and hi.isalnum():
-                tokens.append(("range", lo.upper(), hi.upper()))
+                lo_u, hi_u = lo.upper(), hi.upper()
+                diff = [i for i in range(len(lo_u)) if lo_u[i] != hi_u[i]]
+                if len(diff) == 1 and diff[0] != len(lo_u) - 1:
+                    # The varying character is in the middle, not at the end
+                    # -- e.g. "EA6-EH6" means EA6/EB6/.../EH6 (Balearic Is.),
+                    # NOT "everything lexicographically between EA6 and EH6".
+                    # That distinction matters: EA8 falls inside the naive
+                    # lexicographic range [EA6, EH6] (same first character,
+                    # 'A' <= 'A' <= 'H') even though EA8 is Canary Islands'
+                    # own distinct prefix ("EA8-EH8", a separate entity) --
+                    # a real mismatch this exact case caused. A true
+                    # lexicographic range only makes sense when the *last*
+                    # character is what varies, so expand this one
+                    # explicitly into one literal token per character
+                    # instead of treating lo/hi as range bounds.
+                    pos = diff[0]
+                    for code in range(ord(lo_u[pos]), ord(hi_u[pos]) + 1):
+                        tokens.append(("literal", lo_u[:pos] + chr(code) + lo_u[pos + 1:]))
+                    prev_stem = lo_u[:-1]
+                    continue
+                tokens.append(("range", lo_u, hi_u))
                 prev_stem = lo[:-1]
                 continue
             # Anything else (nested/irregular notation like "UI1-7" embedded

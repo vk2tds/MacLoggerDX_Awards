@@ -41,6 +41,9 @@ run_simple_module("test_wsjtx_udp")
 run_simple_module("test_ft8_parser")
 run_simple_module("test_dxcc_lookup")
 run_simple_module("test_qsl_helper")
+run_simple_module("test_live_monitor_reply")
+run_simple_module("test_qso_queue")
+run_simple_module("test_macloggerdx_bridge")
 
 # -- test_log_status.py, with hand-rolled fixtures --
 import test_log_status as tls  # noqa: E402
@@ -93,6 +96,46 @@ try:
         tls.test_missing_database_reports_error_not_crash, pathlib.Path(tmp_dir))
 finally:
     os.rmdir(tmp_dir)
+
+# -- test_log_writer.py, with hand-rolled fixtures --
+import test_log_writer as tlw  # noqa: E402
+
+
+def make_writer_db():
+    fd, path = tempfile.mkstemp(suffix=".sql")
+    os.close(fd)
+    conn = sqlite3.connect(path)
+    conn.execute(
+        """
+        CREATE TABLE qso_table_v008 (
+            pk INTEGER PRIMARY KEY,
+            my_call TEXT, my_grid TEXT, call TEXT, grid TEXT,
+            dxcc_country TEXT, dxcc_id INTEGER, cq_zone TEXT,
+            mode TEXT, band_rx TEXT, band_tx TEXT,
+            rst_sent TEXT, rst_received TEXT,
+            qsl_sent TEXT, qsl_received TEXT, comments TEXT,
+            qso_start REAL, qso_done REAL,
+            tx_frequency REAL, rx_frequency REAL,
+            distance REAL, azimuth REAL, latitude REAL, longitude REAL
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+    return path
+
+
+for fn_name in (
+    "test_insert_qso_writes_expected_row",
+    "test_insert_qso_leaves_distance_unset_matching_short_grid_convention",
+    "test_find_possible_duplicate_detects_recent_same_call_band_mode",
+    "test_find_possible_duplicate_ignores_old_or_different_contact",
+):
+    wdb_path = make_writer_db()
+    try:
+        run(f"test_log_writer.{fn_name}", getattr(tlw, fn_name), wdb_path)
+    finally:
+        os.unlink(wdb_path)
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

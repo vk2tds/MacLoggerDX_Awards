@@ -1,0 +1,489 @@
+{% extends "base.html" %}
+{% block title %}Radio{% endblock %}
+{% block content %}
+<h1>Radio Control</h1>
+<p style="color:#666; font-size:0.85rem; max-width:60em; margin-top:-0.5rem;">
+  Direct rig control via <a href="https://hamlib.github.io/" target="_blank" rel="noopener">Hamlib's</a> rigctld
+  daemon -- separate from WSJT-X's own rig connection (its UDP API has no frequency/mode/PTT control at all).
+  Needs rigctld running and reachable at the host/port configured in <code>app.py</code>
+  (default <code>127.0.0.1:4532</code>).
+</p>
+
+<style>
+  .radio-shell { background: #ececec; border: 1px solid #b8b8b8; border-radius: 8px; padding: 0.75rem; font-family: -apple-system, "Segoe UI", sans-serif; color: #111; max-width: 46em; }
+  .radio-conn { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; margin-bottom: 0.6rem; }
+  .radio-conn .dot { width: 0.8rem; height: 0.8rem; border-radius: 50%; background: #999; flex-shrink: 0; }
+  .radio-conn .dot.up { background: #2e9c4a; }
+  .radio-conn .dot.down { background: #c62828; }
+  .radio-conn .err { color: #b45309; }
+
+  .freq-readout { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
+  .freq-readout .val { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.9rem; font-weight: 600; background: #000; color: #ffcc33; padding: 0.15rem 0.7rem; border-radius: 3px; letter-spacing: 1px; }
+  .freq-readout .band-badge { font-size: 0.85rem; color: #555; background: #fff; border: 1px solid #ccc; border-radius: 3px; padding: 0.15rem 0.5rem; }
+
+  .radio-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
+  .radio-row input[type=text] { font-size: 0.9rem; padding: 0.25rem 0.4rem; }
+  .radio-row button { cursor: pointer; border: 1px solid #999; background: #f4f4f4; border-radius: 3px; padding: 0.3rem 0.7rem; font-size: 0.85rem; }
+  .radio-row button:hover { background: #e6e6e6; }
+
+  .band-row { display: flex; gap: 2px; flex-wrap: wrap; margin-bottom: 0.6rem; }
+  .band-row button { flex: 1 1 auto; min-width: 3rem; padding: 0.4rem 0.2rem; border: 1px solid #999; background: #e8e8e8; cursor: pointer; font-size: 0.8rem; border-radius: 2px; }
+  .band-row button:hover { background: #d8d8d8; }
+  .band-row button.current { background: #2e9c4a; color: #fff; border-color: #2e9c4a; }
+
+  .mode-row { display: flex; gap: 2px; flex-wrap: wrap; margin-bottom: 0.6rem; }
+  .mode-row button { padding: 0.35rem 0.7rem; border: 1px solid #999; background: #e8e8e8; cursor: pointer; font-size: 0.82rem; border-radius: 2px; }
+  .mode-row button:hover { background: #d8d8d8; }
+  .mode-row button.current { background: #2f6fed; color: #fff; border-color: #2f6fed; }
+
+  .ptt-btn { font-size: 1rem; font-weight: 600; padding: 0.6rem 1.5rem; border-radius: 4px; border: 1px solid #999; background: #e8e8e8; cursor: pointer; }
+  .ptt-btn.keyed { background: #c62828; color: #fff; border-color: #c62828; }
+  .ptt-warn { font-size: 0.72rem; color: #888; margin-left: 0.75rem; }
+
+  .action-result { font-size: 0.78rem; margin-left: 0.5rem; }
+  .action-result.ok { color: #2e7d32; }
+  .action-result.err { color: #c62828; }
+
+  .smeter-wrap { margin-bottom: 0.6rem; }
+  .smeter-track { height: 14px; background: #ddd; border: 1px solid #999; border-radius: 3px; overflow: hidden; }
+  .smeter-fill { height: 100%; width: 0%; background: linear-gradient(to right, #2e9c4a, #e6a817 70%, #c62828); }
+  .smeter-label { font-size: 0.78rem; color: #333; margin-top: 0.2rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  .radio-row input[type=number] { font-size: 0.9rem; padding: 0.25rem 0.4rem; width: 6em; }
+
+  .radio-row select { font-size: 0.9rem; padding: 0.2rem 0.3rem; }
+  .radio-row label { display: flex; align-items: center; gap: 0.3rem; font-size: 0.85rem; }
+  .proc-log { background: #111; color: #ddd; font-size: 0.72rem; padding: 0.5rem; max-height: 200px; overflow: auto; white-space: pre-wrap; border-radius: 4px; }
+  .proc-summary { cursor: pointer; font-size: 0.82rem; color: #555; }
+  .proc-hint { font-size: 0.72rem; color: #888; }
+</style>
+
+<div class="radio-shell" style="margin-bottom: 1rem;">
+  <div class="radio-conn">
+    <span class="dot" id="conn-dot"></span>
+    <span id="conn-text">connecting…</span>
+  </div>
+
+  <div class="freq-readout">
+    <span class="val" id="freq-val">--.------</span>
+    <span class="band-badge" id="mode-val">--</span>
+    <span class="band-badge" id="band-val">--</span>
+  </div>
+
+  <div class="smeter-wrap">
+    <div class="smeter-track"><div class="smeter-fill" id="smeter-fill"></div></div>
+    <div class="smeter-label" id="smeter-label">S-meter: --</div>
+  </div>
+
+  <div class="radio-row">
+    <label>Frequency (MHz) <input id="freq-input" type="text" size="10" placeholder="14.074000"></label>
+    <button id="freq-set-btn">Set</button>
+    <span class="action-result" id="freq-result"></span>
+  </div>
+
+  <div class="mode-row" id="mode-row">
+    <button data-mode="USB">USB</button>
+    <button data-mode="LSB">LSB</button>
+    <button data-mode="CW">CW</button>
+    <button data-mode="AM">AM</button>
+    <button data-mode="FM">FM</button>
+    <button data-mode="PKTUSB">DATA (PKTUSB)</button>
+    <span class="action-result" id="mode-result"></span>
+  </div>
+
+  <div class="band-row" id="band-row" title="QSY to the standard FT8 calling frequency for the band">
+    <button data-band="160M">160</button><button data-band="80M">80</button><button data-band="60M">60</button>
+    <button data-band="40M">40</button><button data-band="30M">30</button><button data-band="20M">20</button>
+    <button data-band="17M">17</button><button data-band="15M">15</button><button data-band="12M">12</button>
+    <button data-band="10M">10</button><button data-band="6M">6</button><button data-band="2M">2</button>
+  </div>
+
+  <div class="radio-row">
+    <label>RIT (Hz) <input id="rit-input" type="number" step="10" value="0"></label>
+    <button id="rit-set-btn">Set</button>
+    <button id="rit-clear-btn">Clear</button>
+    <span class="action-result" id="rit-result"></span>
+  </div>
+
+  <div class="radio-row">
+    <label>XIT (Hz) <input id="xit-input" type="number" step="10" value="0"></label>
+    <button id="xit-set-btn">Set</button>
+    <button id="xit-clear-btn">Clear</button>
+    <span class="action-result" id="xit-result"></span>
+  </div>
+
+  <div class="radio-row">
+    <label>RF Power (W) <input id="power-input" type="number" step="1" min="0" placeholder="--"></label>
+    <button id="power-set-btn">Set</button>
+    <span class="proc-hint" id="power-readout"></span>
+    <span class="action-result" id="power-result"></span>
+  </div>
+
+  <div class="radio-row">
+    <button class="ptt-btn" id="ptt-btn">Key Tx</button>
+    <span class="ptt-warn">Directly keys the transmitter via rigctld -- not gated through WSJT-X at all.</span>
+    <span class="action-result" id="ptt-result"></span>
+  </div>
+</div>
+
+<div class="radio-shell">
+  <h3 style="margin: 0 0 0.5rem;">rigctld process</h3>
+  <div class="radio-conn">
+    <span class="dot" id="proc-dot"></span>
+    <span id="proc-text">checking…</span>
+  </div>
+
+  <div class="radio-row">
+    <button id="proc-start-btn">Start</button>
+    <button id="proc-stop-btn">Stop</button>
+    <button id="proc-restart-btn">Restart</button>
+    <span class="action-result" id="proc-action-result"></span>
+  </div>
+
+  <div class="radio-row">
+    <label>Rig model <select id="proc-rig-model" style="min-width: 18em;"><option value="">Loading…</option></select></label>
+  </div>
+  <div class="radio-row">
+    <label>Serial device
+      <input id="proc-device" list="proc-device-list" type="text" placeholder="/dev/cu.usbserial-XXXX" style="min-width: 16em;">
+    </label>
+    <datalist id="proc-device-list"></datalist>
+  </div>
+  <div class="radio-row">
+    <label>Baud <input id="proc-baud" type="text" size="6" placeholder="rig default"></label>
+    <label>Listen host <input id="proc-host" type="text" size="10" value="127.0.0.1"></label>
+    <label>Listen port <input id="proc-port" type="text" size="6" value="4532"></label>
+  </div>
+  <div class="radio-row">
+    <label>Extra args <input id="proc-extra" type="text" size="34" placeholder="e.g. -p /dev/cu.usbserial-XXXX"></label>
+  </div>
+  <div class="radio-row">
+    <label>Binary path override <input id="proc-binary" type="text" size="34" placeholder="auto-detected"></label>
+    <button id="proc-save-btn">Save Config</button>
+    <span class="action-result" id="proc-save-result"></span>
+  </div>
+  <p class="proc-hint">Config changes take effect on the next Start/Restart -- an already-running rigctld keeps its
+    current settings until then.</p>
+
+  <details id="proc-log-details">
+    <summary class="proc-summary">rigctld log (last 60 lines)</summary>
+    <pre class="proc-log" id="proc-log"></pre>
+  </details>
+</div>
+
+<script>
+(function () {
+  const connDot = document.getElementById('conn-dot');
+  const connText = document.getElementById('conn-text');
+  const freqVal = document.getElementById('freq-val');
+  const modeVal = document.getElementById('mode-val');
+  const bandVal = document.getElementById('band-val');
+  const freqInput = document.getElementById('freq-input');
+  const freqSetBtn = document.getElementById('freq-set-btn');
+  const freqResult = document.getElementById('freq-result');
+  const modeRow = document.getElementById('mode-row');
+  const modeResult = document.getElementById('mode-result');
+  const bandRow = document.getElementById('band-row');
+  const pttBtn = document.getElementById('ptt-btn');
+  const pttResult = document.getElementById('ptt-result');
+  const smeterFill = document.getElementById('smeter-fill');
+  const smeterLabel = document.getElementById('smeter-label');
+  const ritInput = document.getElementById('rit-input');
+  const ritSetBtn = document.getElementById('rit-set-btn');
+  const ritClearBtn = document.getElementById('rit-clear-btn');
+  const ritResult = document.getElementById('rit-result');
+  const xitInput = document.getElementById('xit-input');
+  const xitSetBtn = document.getElementById('xit-set-btn');
+  const xitClearBtn = document.getElementById('xit-clear-btn');
+  const xitResult = document.getElementById('xit-result');
+  const powerInput = document.getElementById('power-input');
+  const powerSetBtn = document.getElementById('power-set-btn');
+  const powerReadout = document.getElementById('power-readout');
+  const powerResult = document.getElementById('power-result');
+
+  let pttState = false;
+  let freqFocused = false;
+  freqInput.addEventListener('focus', () => { freqFocused = true; });
+  freqInput.addEventListener('blur', () => { freqFocused = false; });
+  let ritFocused = false;
+  ritInput.addEventListener('focus', () => { ritFocused = true; });
+  ritInput.addEventListener('blur', () => { ritFocused = false; });
+  let xitFocused = false;
+  xitInput.addEventListener('focus', () => { xitFocused = true; });
+  xitInput.addEventListener('blur', () => { xitFocused = false; });
+  let powerFocused = false;
+  powerInput.addEventListener('focus', () => { powerFocused = true; });
+  powerInput.addEventListener('blur', () => { powerFocused = false; });
+
+  // Hamlib S-meter values are dBS: 0 = S9, ~6dB per S-unit below that. Not
+  // standardized above S9 -- shown as "S9+NdB" there, per common convention.
+  function sMeterInfo(dbs) {
+    if (dbs === null || dbs === undefined) return { label: 'S-meter: --', pct: 0 };
+    const sUnit = 9 + dbs / 6;
+    const label = sUnit <= 9 ? `S${Math.max(0, Math.round(sUnit))}` : `S9+${Math.round(dbs)}dB`;
+    const pct = Math.max(0, Math.min(100, ((dbs + 54) / 114) * 100));
+    return { label: `S-meter: ${label} (${Math.round(dbs)} dBS)`, pct };
+  }
+
+  function showResult(el, ok, msg) {
+    el.textContent = msg || (ok ? 'OK' : 'Failed');
+    el.className = 'action-result ' + (ok ? 'ok' : 'err');
+    setTimeout(() => { el.textContent = ''; }, 4000);
+  }
+
+  function postJson(url, body) {
+    return fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}),
+    }).then(r => r.json());
+  }
+
+  function renderStatus(s) {
+    if (!s.connected) {
+      connDot.className = 'dot down';
+      connText.textContent = s.error || 'Not connected';
+      connText.className = 'err';
+      return;
+    }
+    connDot.className = 'dot up';
+    connText.textContent = s.error ? s.error : 'connected';
+    connText.className = s.error ? 'err' : '';
+    if (s.error) return;
+
+    freqVal.textContent = (s.frequency_hz / 1e6).toFixed(6);
+    if (!freqFocused) freqInput.value = (s.frequency_hz / 1e6).toFixed(6);
+    modeVal.textContent = s.mode || '--';
+    bandVal.textContent = s.band || '--';
+
+    bandRow.querySelectorAll('button').forEach(b => b.classList.toggle('current', b.dataset.band === s.band));
+    modeRow.querySelectorAll('button').forEach(b => b.classList.toggle('current', b.dataset.mode === s.mode));
+
+    pttState = !!s.ptt;
+    pttBtn.textContent = pttState ? 'Unkey Tx' : 'Key Tx';
+    pttBtn.classList.toggle('keyed', pttState);
+
+    const meter = sMeterInfo(s.strength_dbs);
+    smeterFill.style.width = meter.pct + '%';
+    smeterLabel.textContent = s.strength_error ? 'S-meter: unavailable' : meter.label;
+
+    if (!ritFocused) ritInput.value = s.rit_hz ?? 0;
+    if (!xitFocused) xitInput.value = s.xit_hz ?? 0;
+    if (s.rfpower_watts !== null && s.rfpower_watts !== undefined) {
+      if (!powerFocused) powerInput.value = Math.round(s.rfpower_watts);
+      powerReadout.textContent = `(${Math.round(s.rfpower_fraction * 100)}% of max)`;
+    } else {
+      powerReadout.textContent = s.rfpower_error ? 'unavailable' : '';
+    }
+  }
+
+  function poll() {
+    fetch('/radio/status').then(r => r.json()).then(renderStatus).catch(err => {
+      connDot.className = 'dot down';
+      connText.textContent = String(err);
+      connText.className = 'err';
+    });
+  }
+
+  freqSetBtn.addEventListener('click', () => {
+    const mhz = parseFloat(freqInput.value);
+    if (!isFinite(mhz) || mhz <= 0) { showResult(freqResult, false, 'Enter a frequency in MHz'); return; }
+    postJson('/radio/frequency', { frequency_hz: mhz * 1e6 })
+      .then(d => showResult(freqResult, d.ok, d.ok ? 'Sent' : d.error))
+      .catch(e => showResult(freqResult, false, String(e)));
+  });
+
+  modeRow.querySelectorAll('button[data-mode]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      postJson('/radio/mode', { mode: btn.dataset.mode, passband: 0 })
+        .then(d => showResult(modeResult, d.ok, d.ok ? 'Sent' : d.error))
+        .catch(e => showResult(modeResult, false, String(e)));
+    });
+  });
+
+  bandRow.querySelectorAll('button[data-band]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      postJson('/radio/band/' + encodeURIComponent(btn.dataset.band), {})
+        .then(d => showResult(freqResult, d.ok, d.ok ? 'QSY sent' : d.error))
+        .catch(e => showResult(freqResult, false, String(e)));
+    });
+  });
+
+  pttBtn.addEventListener('click', () => {
+    postJson('/radio/ptt', { on: !pttState })
+      .then(d => showResult(pttResult, d.ok, d.ok ? 'OK' : d.error))
+      .catch(e => showResult(pttResult, false, String(e)));
+  });
+
+  function setRit(hz) {
+    postJson('/radio/rit', { hz })
+      .then(d => showResult(ritResult, d.ok, d.ok ? 'Sent' : d.error))
+      .catch(e => showResult(ritResult, false, String(e)));
+  }
+  ritSetBtn.addEventListener('click', () => setRit(parseInt(ritInput.value, 10) || 0));
+  ritClearBtn.addEventListener('click', () => { ritInput.value = 0; setRit(0); });
+
+  function setXit(hz) {
+    postJson('/radio/xit', { hz })
+      .then(d => showResult(xitResult, d.ok, d.ok ? 'Sent' : d.error))
+      .catch(e => showResult(xitResult, false, String(e)));
+  }
+  xitSetBtn.addEventListener('click', () => setXit(parseInt(xitInput.value, 10) || 0));
+  xitClearBtn.addEventListener('click', () => { xitInput.value = 0; setXit(0); });
+
+  powerSetBtn.addEventListener('click', () => {
+    const watts = parseFloat(powerInput.value);
+    if (!isFinite(watts) || watts < 0) { showResult(powerResult, false, 'Enter power in watts'); return; }
+    postJson('/radio/power', { watts })
+      .then(d => showResult(powerResult, d.ok, d.ok ? 'Sent' : d.error))
+      .catch(e => showResult(powerResult, false, String(e)));
+  });
+
+  poll();
+  setInterval(poll, 1000);
+
+  // -- rigctld process management --
+  const procDot = document.getElementById('proc-dot');
+  const procText = document.getElementById('proc-text');
+  const procStartBtn = document.getElementById('proc-start-btn');
+  const procStopBtn = document.getElementById('proc-stop-btn');
+  const procRestartBtn = document.getElementById('proc-restart-btn');
+  const procActionResult = document.getElementById('proc-action-result');
+  const procRigModel = document.getElementById('proc-rig-model');
+  const procDevice = document.getElementById('proc-device');
+  const procDeviceList = document.getElementById('proc-device-list');
+  const procBaud = document.getElementById('proc-baud');
+  const procHost = document.getElementById('proc-host');
+  const procPort = document.getElementById('proc-port');
+  const procExtra = document.getElementById('proc-extra');
+  const procBinary = document.getElementById('proc-binary');
+  const procSaveBtn = document.getElementById('proc-save-btn');
+  const procSaveResult = document.getElementById('proc-save-result');
+  const procLogDetails = document.getElementById('proc-log-details');
+  const procLog = document.getElementById('proc-log');
+
+  function loadRigModels() {
+    fetch('/radio/process/rig_models').then(r => r.json()).then(d => {
+      const models = d.models || [];
+      const byMfg = {};
+      models.forEach(m => { (byMfg[m.mfg] = byMfg[m.mfg] || []).push(m); });
+      const mfgs = Object.keys(byMfg).sort();
+      let html = '<option value="">-- select --</option>';
+      mfgs.forEach(mfg => {
+        html += `<optgroup label="${mfg}">`;
+        byMfg[mfg].sort((a, b) => a.model.localeCompare(b.model)).forEach(m => {
+          html += `<option value="${m.id}">${m.model} (${m.id})</option>`;
+        });
+        html += '</optgroup>';
+      });
+      procRigModel.innerHTML = html;
+      loadProcConfig();
+    }).catch(() => { procRigModel.innerHTML = '<option value="">(failed to load)</option>'; });
+  }
+
+  function loadSerialDevices() {
+    fetch('/radio/process/serial_devices').then(r => r.json()).then(d => {
+      procDeviceList.innerHTML = (d.devices || []).map(dev => `<option value="${dev}">`).join('');
+    }).catch(() => {});
+  }
+
+  function loadProcConfig() {
+    fetch('/radio/process/config').then(r => r.json()).then(cfg => {
+      procRigModel.value = cfg.rig_model || '';
+      procDevice.value = cfg.device || '';
+      procBaud.value = cfg.baud || '';
+      procHost.value = cfg.listen_host || '127.0.0.1';
+      procPort.value = cfg.listen_port || 4532;
+      procExtra.value = cfg.extra_args || '';
+      procBinary.value = cfg.binary_path || '';
+    }).catch(() => {});
+  }
+
+  function buildProcConfigBody() {
+    return {
+      rig_model: procRigModel.value, device: procDevice.value.trim(), baud: procBaud.value.trim(),
+      listen_host: procHost.value.trim(), listen_port: procPort.value.trim(),
+      extra_args: procExtra.value.trim(), binary_path: procBinary.value.trim(),
+    };
+  }
+
+  function saveProcConfig() {
+    return postJson('/radio/process/config', buildProcConfigBody());
+  }
+
+  procSaveBtn.addEventListener('click', () => {
+    saveProcConfig()
+      .then(d => showResult(procSaveResult, d.ok, d.ok ? 'Saved' : d.error))
+      .catch(e => showResult(procSaveResult, false, String(e)));
+  });
+
+  function renderProcStatus(s) {
+    if (s.managed_running) {
+      procDot.className = 'dot up';
+      procText.textContent = `Running (PID ${s.managed_pid}, started by this app)`;
+    } else if (s.external_running) {
+      procDot.className = 'dot up';
+      procText.textContent = 'Running (started outside this app -- Stop/Restart unavailable)';
+    } else {
+      procDot.className = 'dot down';
+      procText.textContent = s.binary_path ? 'Not running' : 'Not running -- rigctld binary not found (install Hamlib)';
+    }
+    procStopBtn.disabled = !s.managed_running;
+    procRestartBtn.disabled = !s.managed_running;
+    procStartBtn.disabled = s.managed_running || s.external_running;
+  }
+
+  function pollProcStatus() {
+    fetch('/radio/process/status').then(r => r.json()).then(renderProcStatus).catch(() => {});
+  }
+
+  function refreshProcLog() {
+    fetch('/radio/process/log').then(r => r.json()).then(d => { procLog.textContent = d.log || '(empty)'; }).catch(() => {});
+  }
+  procLogDetails.addEventListener('toggle', () => { if (procLogDetails.open) refreshProcLog(); });
+
+  procStartBtn.addEventListener('click', () => {
+    procStartBtn.disabled = true;
+    // Save whatever's currently in the form first -- Start should reflect
+    // what's on screen, not require a separate Save Config click beforehand.
+    saveProcConfig().then(saveResult => {
+      if (!saveResult.ok) {
+        showResult(procActionResult, false, 'Config not saved: ' + saveResult.error);
+        pollProcStatus();
+        return;
+      }
+      return postJson('/radio/process/start', {}).then(d => {
+        showResult(procActionResult, d.ok, d.message);
+        pollProcStatus();
+        if (procLogDetails.open) refreshProcLog();
+      });
+    }).catch(e => showResult(procActionResult, false, String(e)));
+  });
+
+  procStopBtn.addEventListener('click', () => {
+    postJson('/radio/process/stop', {}).then(d => {
+      showResult(procActionResult, d.ok, d.message);
+      pollProcStatus();
+    }).catch(e => showResult(procActionResult, false, String(e)));
+  });
+
+  procRestartBtn.addEventListener('click', () => {
+    saveProcConfig().then(saveResult => {
+      if (!saveResult.ok) {
+        showResult(procActionResult, false, 'Config not saved: ' + saveResult.error);
+        pollProcStatus();
+        return;
+      }
+      return postJson('/radio/process/restart', {}).then(d => {
+        showResult(procActionResult, d.ok, d.message);
+        pollProcStatus();
+        if (procLogDetails.open) refreshProcLog();
+      });
+    }).catch(e => showResult(procActionResult, false, String(e)));
+  });
+
+  loadRigModels();
+  loadSerialDevices();
+  pollProcStatus();
+  setInterval(pollProcStatus, 2000);
+})();
+</script>
+{% endblock %}

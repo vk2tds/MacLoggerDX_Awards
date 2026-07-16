@@ -90,8 +90,8 @@ def _cell_status_and_tooltip(value, country, band, tracking):
                 continue
             call, when, last_lotw = line.split(',', 2)
             when_epoch = int(when.split('.', 1)[0])
-            dt = datetime.datetime.fromtimestamp(when_epoch)
-            age = datetime.datetime.now() - dt
+            dt = datetime.datetime.utcfromtimestamp(when_epoch)
+            age = datetime.datetime.utcnow() - dt
             color = 'green' if age.days < 14 else 'orange' if age.days < 28 else 'red' if age.days < 90 else 'black'
             last = last_lotw if last_lotw else 'NEVER'
             pending_html += '<div style="color:%s;">%s %s %s</div>' % (

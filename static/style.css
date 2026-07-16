@@ -30,12 +30,13 @@ th, td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; }
 .topnav {
   display: flex;
   align-items: center;
-  gap: 1.25rem;
+  flex-wrap: wrap;
+  gap: 0.6rem 1.25rem;
   padding: 0.6rem 1.5rem;
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg) 92%, var(--fg));
 }
-.topnav .brand { font-weight: 600; margin-right: 0.5rem; }
+.topnav .brand { font-weight: 600; margin-right: 0.5rem; white-space: nowrap; }
 .topnav a { color: inherit; text-decoration: none; }
 .topnav a:hover { text-decoration: underline; }
 .refresh-form { margin: 0 0 0 auto; }

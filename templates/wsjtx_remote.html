@@ -1,0 +1,790 @@
+{% extends "base.html" %}
+{% block title %}WSJT-X Remote{% endblock %}
+{% block content %}
+<h1>WSJT-X Remote</h1>
+<p style="color:#666; font-size:0.85rem; max-width:60em; margin-top:-0.5rem;">
+  Remote control surface for WSJT-X. Most controls go over its UDP API; a few (Stop, Monitor, Decode, and the
+  band/mode buttons) have no UDP equivalent at all and instead drive WSJT-X's own window directly via
+  AppleScript/Accessibility scripting -- see the hint text below the button row if that stops working (it
+  needs WSJT-X running and this app to have Accessibility permission). Enable Tx and Tune are deliberately
+  left disabled: AppleScript can toggle their on-screen state but doesn't actually key the transmitter,
+  confirmed against rigctld's live PTT reading -- misleading, so not wired up. Rig frequency/band control is
+  separate: see the <a href="{{ url_for('radio.radio_view') }}">Radio</a> tab (rigctld).
+</p>
+<p style="font-size:0.85rem; margin: 0 0 0.5rem;">
+  <label>My call <input id="my-call" type="text" value="{{ my_call }}" size="10"></label>
+</p>
+
+<style>
+  .wsjtx-shell { background: #ececec; border: 1px solid #b8b8b8; border-radius: 8px; padding: 0.75rem; font-family: -apple-system, "Segoe UI", sans-serif; color: #111; }
+
+  .panels-title-row { display: flex; gap: 1px; background: #b8b8b8; border: 1px solid #b8b8b8; border-radius: 4px 4px 0 0; overflow: hidden; }
+  .panels-title-row > div { flex: 1; background: #d8d8d8; text-align: center; font-weight: 600; font-size: 0.85rem; padding: 0.3rem; }
+
+  .remote-panels { display: flex; gap: 1px; background: #b8b8b8; border: 1px solid #b8b8b8; border-top: none; margin-bottom: 0.75rem; }
+  .remote-panel { flex: 1 1 50%; min-width: 0; background: #fff; }
+
+  /* Below tablet-ish widths the two panes get too cramped to read (Message
+     column truncates badly) -- stack them instead, each keeping its own
+     horizontal scroll for the table itself. */
+  @media (max-width: 900px) {
+    .panels-title-row, .remote-panels { flex-direction: column; }
+    .remote-panel { flex: 1 1 auto; }
+  }
+  .remote-panel-scroll { overflow-x: auto; max-height: 42vh; overflow-y: auto; }
+  table.remote-table { border-collapse: collapse; width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; }
+  table.remote-table th, table.remote-table td { padding: 0.12rem 0.4rem; text-align: left; white-space: nowrap; }
+  table.remote-table thead th { position: sticky; top: 0; background: #eee; border-bottom: 1px solid #ccc; font-weight: 600; }
+  table.remote-table tbody tr:hover { background: #eef6ff; cursor: pointer; }
+  .row-cq { background: #c9f2c9; }
+  .call-link { text-decoration: underline dotted; cursor: pointer; }
+  .qrz-link { color: #888; text-decoration: none; font-size: 0.7rem; border: 1px solid #ccc; border-radius: 3px; padding: 0 0.25rem; margin-left: 0.25rem; }
+  .qrz-link:hover { color: #1565c0; border-color: #1565c0; }
+  .history-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.4rem; font-size: 0.82rem; margin: 0.6rem 0; }
+  .history-summary div { background: #f4f4f4; border-radius: 4px; padding: 0.35rem 0.5rem; }
+  .history-lines { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; max-height: 40vh; overflow-y: auto; background: #fafafa; padding: 0.5rem; border-radius: 4px; }
+  .history-lines div.tx { color: #1565c0; }
+  .row-directed { background: #ff9d9d; }
+  .time-bold { font-weight: 700; }
+  .rxfreq-controls { font-size: 0.7rem; color: #666; padding: 0.1rem 0.4rem; text-align: right; background: #fff; border-bottom: 1px solid #eee; }
+  .rxfreq-controls input { width: 3.5em; }
+
+  .waterfall-shell { overflow-x: auto; background: #07143a; border: 1px solid #b8b8b8; border-radius: 4px; }
+  #waterfall-canvas { display: block; }
+  .waterfall-caption { font-size: 0.7rem; color: #888; margin: 0.25rem 0 0.75rem; }
+  .waterfall-toolbar { display: flex; align-items: center; gap: 1rem; font-size: 0.78rem; margin-bottom: 0.3rem; }
+  .waterfall-toolbar label { display: flex; align-items: center; gap: 0.3rem; }
+  .waterfall-toolbar input[type=number] { width: 3.5em; }
+  .waterfall-pop-link { color: #1565c0; text-decoration: none; margin-left: auto; }
+  .waterfall-pop-link:hover { text-decoration: underline; }
+
+  .wsjtx-body { display: flex; gap: 0.75rem; align-items: stretch; flex-wrap: wrap; }
+
+  .mode-stack { display: flex; flex-direction: column; gap: 2px; width: 5.5rem; }
+  .mode-stack button { padding: 0.4rem 0.2rem; border: 1px solid #999; background: #f4f4f4; cursor: pointer; font-size: 0.82rem; border-radius: 2px; }
+  .mode-stack button.active { background: #2f6fed; color: #fff; border-color: #2f6fed; font-weight: 600; }
+
+  .center-col { flex: 1 1 320px; min-width: 280px; display: flex; flex-direction: column; gap: 0.5rem; }
+  .band-row { display: flex; gap: 2px; flex-wrap: wrap; }
+  .band-row button { flex: 1 1 auto; min-width: 2.6rem; padding: 0.35rem 0.2rem; border: 1px solid #999; background: #e8e8e8; color: #999; cursor: not-allowed; font-size: 0.78rem; border-radius: 2px; }
+  .band-row button.current { background: #2e9c4a; color: #fff; border-color: #2e9c4a; cursor: default; }
+
+  .btn-row { display: flex; gap: 0.3rem; flex-wrap: wrap; align-items: center; }
+  .btn-row button { padding: 0.3rem 0.7rem; border: 1px solid #999; background: #f4f4f4; font-size: 0.8rem; border-radius: 3px; cursor: pointer; }
+  .btn-row button:disabled { color: #aaa; cursor: not-allowed; background: #ececec; }
+  .btn-row button.live { cursor: pointer; }
+  .btn-row button.live:hover { background: #e0e0e0; }
+  .btn-row label { font-size: 0.78rem; display: flex; align-items: center; gap: 0.25rem; }
+  .gui-toggle { padding: 0.15rem 0.4rem; border: 1px solid #999; border-radius: 3px; background: #f4f4f4; }
+  .gui-toggle-warn { border-color: #c62828; }
+  .gui-toggle-warn input:checked + * , .gui-toggle-warn:has(input:checked) { color: #c62828; }
+  #gui-bridge-hint.err { color: #c62828; }
+
+  .freq-readout { display: flex; align-items: center; gap: 0.5rem; }
+  .freq-readout .dot { width: 0.8rem; height: 0.8rem; border-radius: 50%; background: #999; flex-shrink: 0; }
+  .freq-readout .dot.up { background: #2e9c4a; }
+  .freq-readout .dot.down { background: #c62828; }
+  .freq-readout .val { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.7rem; font-weight: 600; background: #000; color: #ffcc33; padding: 0.1rem 0.6rem; border-radius: 3px; letter-spacing: 1px; }
+
+  .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem 0.6rem; background: #fff; border: 1px solid #ccc; border-radius: 4px; padding: 0.5rem; }
+  .field-grid label { font-size: 0.72rem; color: #555; display: block; }
+  .field-grid input, .field-grid select { width: 100%; box-sizing: border-box; padding: 0.2rem 0.3rem; font-size: 0.85rem; }
+  .field-grid .full { grid-column: 1 / -1; }
+
+  .right-col { flex: 1 1 320px; min-width: 280px; background: #fff; border: 1px solid #ccc; border-radius: 4px; padding: 0.6rem; }
+  .right-col h3 { font-size: 0.85rem; margin: 0 0 0.5rem; }
+  .tx-msg-row { display: flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.4rem; border: 1px solid #ddd; border-radius: 3px; margin-bottom: 0.3rem; background: #fafafa; }
+  .tx-msg-row input[type=text] { flex: 1; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; border: 1px solid #ccc; padding: 0.25rem 0.4rem; }
+  .action-result { font-size: 0.75rem; margin-left: 0.4rem; }
+  .action-result.ok { color: #2e7d32; }
+  .action-result.err { color: #c62828; }
+  .warn { color: #b45309; font-size: 0.72rem; margin-top: 0.4rem; }
+
+  .status-strip { display: flex; gap: 1rem; align-items: center; margin-top: 0.75rem; padding: 0.4rem 0.7rem; border-radius: 4px; font-size: 0.8rem; background: #2e9c4a; color: #fff; }
+  .status-strip.tx { background: #f4c20d; color: #000; }
+  .status-strip .sep { opacity: 0.6; }
+
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
+  .modal-box { background: #fff; border-radius: 6px; padding: 1rem 1.25rem; width: min(560px, 92vw); max-height: 85vh; overflow-y: auto; box-shadow: 0 8px 30px rgba(0,0,0,0.3); }
+  .modal-box h3 { margin: 0 0 0.3rem; }
+</style>
+
+<div class="wsjtx-shell">
+  <div class="panels-title-row"><div>Band Activity</div><div>Rx Frequency (within <input id="rxfreq-window" type="number" value="100" style="width:3.5em;"> Hz of your Rx DF)</div></div>
+  <div class="remote-panels">
+    <div class="remote-panel">
+      <div class="remote-panel-scroll">
+        <table class="remote-table">
+          <thead><tr><th>UTC</th><th>dB</th><th>DT</th><th>Freq</th><th>Call</th><th>Message</th></tr></thead>
+          <tbody id="band-activity-body"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="remote-panel">
+      <div class="remote-panel-scroll">
+        <table class="remote-table">
+          <thead><tr><th>UTC</th><th>dB</th><th>DT</th><th>Freq</th><th>Call</th><th>Message</th></tr></thead>
+          <tbody id="rx-freq-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="waterfall-block">
+    <div class="waterfall-toolbar">
+      <label>Rows <input id="wf-rows" type="number" min="2" max="120" value="4"></label>
+      <a href="{{ url_for('remote.remote_waterfall_view') }}" target="_blank" class="waterfall-pop-link">Open in own tab &#8599;</a>
+    </div>
+    <div class="waterfall-shell">
+      <canvas id="waterfall-canvas" width="760" height="368"></canvas>
+    </div>
+    <p class="waterfall-caption">
+      Decode-based waterfall -- WSJT-X's UDP API has no spectrum/noise-floor data, so this shows only signals it
+      actually decoded (colored by SNR), one row per decode cycle. Not a true spectrogram.
+    </p>
+  </div>
+
+  <div class="band-row" title="Clicks WSJT-X's own band button (via GUI scripting) -- for actual rig frequency control use the Radio tab (rigctld)">
+    <button class="band-btn">160</button><button class="band-btn">80</button><button class="band-btn">60</button>
+    <button class="band-btn">40</button><button class="band-btn">30</button><button class="band-btn">20</button>
+    <button class="band-btn">17</button><button class="band-btn">15</button><button class="band-btn">12</button>
+    <button class="band-btn">10</button><button class="band-btn">6</button><button class="band-btn">2</button>
+    <button class="band-btn">70</button>
+  </div>
+
+  <div class="btn-row" style="margin: 0.5rem 0;">
+    <label><input type="checkbox" disabled> CQ only</label>
+    <label><input type="checkbox" disabled> BP</label>
+    <button class="live" id="log-qso-btn" title="Preview and confirm logging the current QSO (WSJT-X can't confirm its own Log QSO dialog remotely)">Log QSO</button>
+    <button class="live" id="gui-stop-btn" title="Stop monitoring -- driven via AppleScript/Accessibility scripting of WSJT-X's own window, not UDP">Stop</button>
+    <label class="gui-toggle" title="Toggle monitoring on/off -- via GUI scripting, not UDP"><input type="checkbox" id="gui-monitor"> Monitor</label>
+    <button class="live" id="erase-btn" title="Sends WSJT-X's Clear message">Erase</button>
+    <label class="gui-toggle" title="Decode most recent Rx period -- via GUI scripting, not UDP"><input type="checkbox" id="gui-decode"> Decode</label>
+    <button disabled title="Verified 2026-07-16: AppleScript can toggle this checkbox's visible state but does not actually arm Tx -- misleading, disabled until a real fix is found">Enable Tx</button>
+    <button class="live" id="halt-btn" title="Sends HaltTx">Halt Tx</button>
+    <button disabled title="Verified 2026-07-16: AppleScript can toggle this checkbox's visible state (even turns red) but does not actually key the transmitter -- misleading, disabled until a real fix is found">Tune</button>
+    <label><input type="checkbox" id="wf-show" checked> Waterfall</label>
+  </div>
+  <p class="proc-hint" id="gui-bridge-hint"></p>
+
+  <div class="wsjtx-body">
+    <div class="mode-stack" id="mode-stack">
+      <button data-mode="FT8" class="active">FT8</button>
+      <button data-mode="FT4">FT4</button>
+      <button data-mode="MSK144">MSK144</button>
+      <button data-mode="Q65">Q65</button>
+      <button data-mode="JT65">JT65</button>
+      <button data-mode="JT9">JT9</button>
+    </div>
+
+    <div class="center-col">
+      <div class="freq-readout">
+        <span class="dot" id="rconn-dot"></span>
+        <span class="val" id="status-freq">--.------</span>
+      </div>
+      <div class="field-grid">
+        <div><label>DX Call</label><input id="cfg-dxcall" type="text"></div>
+        <div><label>DX Grid</label><input id="cfg-dxgrid" type="text"></div>
+        <div><label>Rx DF (Hz)</label><input id="cfg-rxdf" type="text" value="1500"></div>
+        <div><label>T/R period (s)</label><input id="cfg-tr" type="text" value="15"></div>
+        <div><label>Freq tolerance (Hz)</label><input id="cfg-tol" type="text" value="10"></div>
+        <div style="display:flex; align-items:flex-end; gap:0.6rem;">
+          <label style="display:flex; align-items:center; gap:0.3rem; font-size:0.78rem;"><input id="cfg-fast" type="checkbox"> Fast</label>
+          <label style="display:flex; align-items:center; gap:0.3rem; font-size:0.78rem;"><input id="cfg-genmsg" type="checkbox" checked> Gen msgs</label>
+        </div>
+        <div class="full">
+          <button id="cfg-submit" style="width:100%; padding:0.35rem;">Apply Configure</button>
+          <span class="action-result" id="cfg-result"></span>
+          <div class="warn">Configure's exact field layout is lower-confidence than the rest of this API -- test carefully.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="right-col">
+      <h3>Tx message</h3>
+      <div class="tx-msg-row">
+        <input id="ft-text" type="text" placeholder="e.g. VK2ABC VK2TDS RR73" maxlength="37">
+      </div>
+      <label style="font-size:0.78rem; display:flex; align-items:center; gap:0.3rem; margin-bottom:0.4rem;">
+        <input id="ft-send" type="checkbox"> Transmit immediately (not just fill the box)
+      </label>
+      <button id="ft-submit">Send</button>
+      <span class="action-result" id="ft-result"></span>
+      <p style="font-size:0.72rem; color:#888; margin-top:0.6rem;">
+        Double-click a row in Band Activity / Rx Frequency to reply to that station (equivalent to
+        double-clicking in WSJT-X itself).
+      </p>
+    </div>
+  </div>
+
+  <div class="status-strip rx" id="status-strip">
+    <span id="status-tx-label">Receiving</span>
+    <span class="sep">|</span>
+    <span id="status-mode">--</span>
+    <span class="sep">|</span>
+    <span>DX: <strong id="status-dx">--</strong> <span id="status-dxgrid"></span></span>
+    <span class="sep">|</span>
+    <span>Last Tx: <span id="status-lasttx">--</span></span>
+    <span class="sep">|</span>
+    <span id="rconn-text">connecting…</span>
+  </div>
+
+  <div id="log-qso-overlay" class="modal-overlay" style="display:none;">
+    <div class="modal-box">
+      <h3>Log QSO</h3>
+      <p style="font-size:0.75rem; color:#888; margin-top:-0.4rem;">
+        WSJT-X can't confirm its own Log QSO dialog remotely, so this builds the record from its current
+        status instead. Review/edit, then add it to the queue below -- nothing reaches MacLoggerDX until
+        you separately click Send on a queued entry (from the Mac MacLoggerDX runs on).
+      </p>
+      <div id="log-qso-error" class="warn" style="display:none;"></div>
+      <div class="field-grid">
+        <div><label>My Call</label><input id="lq-mycall" type="text"></div>
+        <div><label>My Grid</label><input id="lq-mygrid" type="text"></div>
+        <div><label>Call</label><input id="lq-call" type="text"></div>
+        <div><label>Grid</label><input id="lq-grid" type="text"></div>
+        <div><label>Mode</label><input id="lq-mode" type="text"></div>
+        <div><label>Band</label><input id="lq-band" type="text"></div>
+        <div><label>RST Sent</label><input id="lq-rstsent" type="text"></div>
+        <div><label>RST Received</label><input id="lq-rstrcvd" type="text"></div>
+        <div><label>Frequency (MHz)</label><input id="lq-freq" type="text"></div>
+        <div><label>DXCC</label><input id="lq-dxcc" type="text"></div>
+        <div><label>DXCC ID</label><input id="lq-dxccid" type="text"></div>
+        <div><label>CQ Zone</label><input id="lq-cqzone" type="text"></div>
+        <div class="full"><label>Comments</label><input id="lq-comments" type="text"></div>
+      </div>
+      <div style="margin-top:0.6rem; display:flex; gap:0.5rem; align-items:center;">
+        <button id="log-qso-confirm">Add to Queue</button>
+        <button id="log-qso-cancel">Cancel</button>
+        <span class="action-result" id="log-qso-result"></span>
+      </div>
+    </div>
+  </div>
+
+  <div id="history-overlay" class="modal-overlay" style="display:none;">
+    <div class="modal-box">
+      <h3 id="history-title">Callsign</h3>
+      <div id="history-summary" class="history-summary"></div>
+      <div id="history-lines" class="history-lines"></div>
+      <div style="margin-top:0.6rem;">
+        <button id="history-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="right-col" style="margin-top:0.75rem;">
+    <h3>Queued QSOs <span style="font-weight:400;color:#888;font-size:0.75rem;">-- Send only works when run from the Mac MacLoggerDX is on</span></h3>
+    <div style="margin-bottom:0.4rem;">
+      <button id="queue-send-all">Send All Pending</button>
+      <button id="queue-clear-sent">Clear Sent</button>
+      <span class="action-result" id="queue-batch-result"></span>
+    </div>
+    <div class="remote-panel-scroll" style="max-height:30vh;">
+      <table class="remote-table">
+        <thead><tr><th>Queued</th><th>Call</th><th>Band</th><th>Mode</th><th>Status</th><th></th></tr></thead>
+        <tbody id="qso-queue-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='waterfall.js') }}"></script>
+<script>
+(function () {
+  const dot = document.getElementById('rconn-dot');
+  const connText = document.getElementById('rconn-text');
+  const statusFreq = document.getElementById('status-freq');
+  const statusMode = document.getElementById('status-mode');
+  const statusStrip = document.getElementById('status-strip');
+  const statusTxLabel = document.getElementById('status-tx-label');
+  const statusDx = document.getElementById('status-dx');
+  const statusDxGrid = document.getElementById('status-dxgrid');
+  const statusLastTx = document.getElementById('status-lasttx');
+  const bandBody = document.getElementById('band-activity-body');
+  const rxFreqBody = document.getElementById('rx-freq-body');
+  const rxFreqWindow = document.getElementById('rxfreq-window');
+  const modeStack = document.getElementById('mode-stack');
+  const bandRow = document.querySelector('.band-row');
+  const myCallBox = document.getElementById('my-call');
+  const guiStopBtn = document.getElementById('gui-stop-btn');
+  const guiMonitor = document.getElementById('gui-monitor');
+  const guiDecode = document.getElementById('gui-decode');
+  const guiBridgeHint = document.getElementById('gui-bridge-hint');
+  const MAX_ROWS = 200;
+  let currentWs = null;
+  let currentRxDf = null;
+  let currentDialHz = null;
+  const timeGroups = { band: { lastTime: null, alt: false }, rxfreq: { lastTime: null, alt: false } };
+
+  // -- Decode-based waterfall (createWaterfall() in static/waterfall.js,
+  // shared with the standalone /remote/waterfall tab): WSJT-X's UDP API
+  // carries no spectrum/noise data, so this buckets decode events by their
+  // (already cycle-quantized) time_ms into rows and plots each decode as an
+  // SNR-colored blob at its audio frequency. --
+  const wfRowsInput = document.getElementById('wf-rows');
+  const wfShowBox = document.getElementById('wf-show');
+  const waterfallBlock = document.getElementById('waterfall-block');
+  const savedRows = parseInt(localStorage.getItem('wf_rows'), 10);
+  const wf = createWaterfall(document.getElementById('waterfall-canvas'), { rows: savedRows || 4 });
+  wfRowsInput.value = wf.rows;
+
+  wfRowsInput.addEventListener('change', () => {
+    const n = wf.resize(parseInt(wfRowsInput.value, 10));
+    wfRowsInput.value = n;
+    localStorage.setItem('wf_rows', String(n));
+  });
+
+  const savedShow = localStorage.getItem('wf_show');
+  if (savedShow !== null) wfShowBox.checked = savedShow === '1';
+  waterfallBlock.style.display = wfShowBox.checked ? '' : 'none';
+  wfShowBox.addEventListener('change', () => {
+    waterfallBlock.style.display = wfShowBox.checked ? '' : 'none';
+    localStorage.setItem('wf_show', wfShowBox.checked ? '1' : '0');
+  });
+
+  const BAND_TABLE = [
+    [1.8, 2.0, '160'], [3.5, 4.0, '80'], [5.3, 5.4, '60'], [7.0, 7.3, '40'],
+    [10.1, 10.15, '30'], [14.0, 14.35, '20'], [18.068, 18.168, '17'],
+    [21.0, 21.45, '15'], [24.89, 24.99, '12'], [28.0, 29.7, '10'],
+    [50.0, 54.0, '6'], [70.0, 70.5, '2'], [144.0, 148.0, '70'],
+  ];
+
+  function fmtTime(ms) {
+    if (ms === null || ms === undefined) return '';
+    const totalSec = Math.floor(ms / 1000);
+    const h = String(Math.floor(totalSec / 3600) % 24).padStart(2, '0');
+    const m = String(Math.floor(totalSec / 60) % 60).padStart(2, '0');
+    const s = String(totalSec % 60).padStart(2, '0');
+    return `${h}:${m}:${s}`;
+  }
+
+  function fmtDt(dt) {
+    return (dt === null || dt === undefined) ? '' : dt.toFixed(1);
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function fmtUtc(epochS) {
+    if (!epochS) return '';
+    const d = new Date(epochS * 1000);
+    const p = n => String(n).padStart(2, '0');
+    return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ` +
+           `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())} UTC`;
+  }
+
+  function timeGroupBold(groupKey, timeMs) {
+    const state = timeGroups[groupKey];
+    if (state.lastTime !== timeMs) {
+      state.lastTime = timeMs;
+      state.alt = !state.alt;
+    }
+    return state.alt;
+  }
+
+  function directedAtMe(ev) {
+    const mine = (myCallBox.value || '').trim().toUpperCase();
+    return !!mine && !!ev.to_call && ev.to_call.toUpperCase() === mine;
+  }
+
+  function sendReply(ev) {
+    if (!currentWs || currentWs.readyState !== WebSocket.OPEN) return;
+    currentWs.send(JSON.stringify({ action: 'reply', event: ev }));
+    statusLastTx.textContent = 'Calling ' + (ev.call || '') + '...';
+  }
+
+  // -- callsign history popup: MacLoggerDX log summary + full ALL.TXT
+  // exchange history for whatever call was clicked (shares /live/callsign
+  // with Live Monitor rather than re-indexing anything here) --
+  const historyOverlay = document.getElementById('history-overlay');
+  const historyTitle = document.getElementById('history-title');
+  const historySummary = document.getElementById('history-summary');
+  const historyLines = document.getElementById('history-lines');
+
+  function openHistory(call) {
+    historyTitle.textContent = call;
+    historySummary.innerHTML = 'Loading…';
+    historyLines.innerHTML = '';
+    historyOverlay.style.display = 'flex';
+    fetch('/live/callsign/' + encodeURIComponent(call)).then(r => r.json()).then(data => {
+      if (data.error) { historySummary.innerHTML = data.error; return; }
+      const worked = data.worked_before ? `Worked (${data.qso_count} QSO${data.qso_count === 1 ? '' : 's'})` : 'Never worked';
+      const confirmed = data.confirmed_lotw_ever ? 'Confirmed (LoTW)' : (data.confirmed_ever ? 'Confirmed (eQSL/card)' : 'Not confirmed');
+      historySummary.innerHTML = `
+        <div>${worked}</div>
+        <div>${confirmed}</div>
+        <div>${data.dxcc_country || 'DXCC unknown'}</div>
+        <div>${(data.grids_worked || []).join(', ') || 'No grids on file'}</div>
+      `;
+      if (!data.exchange_lines.length) {
+        historyLines.innerHTML = '<em>No ALL.TXT exchange history found for this call.</em>';
+        return;
+      }
+      // Verbatim ALL.TXT lines, unchanged apart from Tx/Rx coloring.
+      historyLines.innerHTML = data.exchange_lines.map(l =>
+        `<div class="${l.rxtx === 'Tx' ? 'tx' : ''}">${escapeHtml(l.raw)}</div>`
+      ).join('');
+    }).catch(e => { historySummary.innerHTML = String(e); });
+  }
+  document.getElementById('history-close').addEventListener('click', () => { historyOverlay.style.display = 'none'; });
+
+  function makeRow(ev, groupKey) {
+    const tr = document.createElement('tr');
+    const classes = [];
+    if (ev.is_cq) classes.push('row-cq');
+    if (directedAtMe(ev)) classes.push('row-directed');
+    tr.className = classes.join(' ');
+    const dt = ev.delta_time_s ?? ev.raw?.delta_time_s;
+    const timeClass = timeGroupBold(groupKey, ev.time_ms) ? 'time-bold' : '';
+    tr.innerHTML = `
+      <td class="${timeClass}">${fmtTime(ev.time_ms)}</td>
+      <td>${ev.snr ?? ''}</td>
+      <td>${fmtDt(dt)}</td>
+      <td>${ev.delta_freq_hz ?? ''}</td>
+      <td><span class="call-link">${ev.call || ''}</span>${ev.call ? `<a class="qrz-link" href="https://www.qrz.com/db/${encodeURIComponent(ev.call)}" target="_blank" rel="noopener">QRZ</a>` : ''}</td>
+      <td>${ev.message || ''}</td>
+    `;
+    tr.title = 'Double-click to call ' + (ev.call || 'this station');
+    tr.addEventListener('dblclick', () => sendReply(ev));
+    const callLink = tr.querySelector('.call-link');
+    if (callLink && ev.call) {
+      callLink.title = 'Click for callsign history';
+      callLink.addEventListener('click', (e) => { e.stopPropagation(); openHistory(ev.call); });
+      callLink.addEventListener('dblclick', (e) => { e.stopPropagation(); });
+    }
+    return tr;
+  }
+
+  function renderDecode(ev) {
+    bandBody.prepend(makeRow(ev, 'band'));
+    while (bandBody.children.length > MAX_ROWS) bandBody.removeChild(bandBody.lastChild);
+    wf.onDecode(ev);
+
+    const windowHz = parseInt(rxFreqWindow.value, 10) || 100;
+    if (currentRxDf !== null && ev.delta_freq_hz !== null && ev.delta_freq_hz !== undefined &&
+        Math.abs(ev.delta_freq_hz - currentRxDf) <= windowHz) {
+      rxFreqBody.prepend(makeRow(ev, 'rxfreq'));
+      while (rxFreqBody.children.length > MAX_ROWS) rxFreqBody.removeChild(rxFreqBody.lastChild);
+    }
+  }
+
+  function updateBandHighlight() {
+    if (currentDialHz === null) return;
+    const mhz = currentDialHz / 1e6;
+    const match = BAND_TABLE.find(([lo, hi]) => mhz >= lo && mhz <= hi);
+    bandRow.querySelectorAll('.band-btn').forEach(btn => {
+      btn.classList.toggle('current', !!match && btn.textContent === match[2]);
+    });
+  }
+
+  function renderStatus(ev) {
+    if (ev.dial_frequency_hz) {
+      currentDialHz = ev.dial_frequency_hz;
+      statusFreq.textContent = (ev.dial_frequency_hz / 1e6).toFixed(6);
+      updateBandHighlight();
+    }
+    if (ev.mode) {
+      statusMode.textContent = ev.mode;
+      modeStack.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.mode === ev.mode));
+    }
+    if (ev.dx_call) statusDx.textContent = ev.dx_call;
+    statusDxGrid.textContent = ev.dx_grid || '';
+    if (ev.transmitting) {
+      statusTxLabel.textContent = 'Transmitting';
+      statusStrip.className = 'status-strip tx';
+    } else {
+      statusTxLabel.textContent = 'Receiving';
+      statusStrip.className = 'status-strip rx';
+    }
+    if (ev.rx_df !== undefined && ev.rx_df !== null) currentRxDf = ev.rx_df;
+    if (ev.tx_message) statusLastTx.textContent = ev.tx_message;
+  }
+
+  function loadCachedStatus() {
+    // Show the last-known status immediately on load/tab-switch instead of
+    // waiting for the next live Status broadcast (which can take up to a
+    // full T/R period to arrive).
+    fetch('/live/config').then(r => r.json()).then(data => {
+      if (data.wsjtx_status && Object.keys(data.wsjtx_status).length) renderStatus(data.wsjtx_status);
+    }).catch(() => {});
+  }
+
+  function connect() {
+    const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+    const ws = new WebSocket(proto + location.host + '/live/ws');
+    currentWs = ws;
+    ws.onopen = () => { dot.className = 'dot up'; connText.textContent = 'connected'; };
+    ws.onclose = () => { dot.className = 'dot down'; connText.textContent = 'disconnected -- retrying...'; setTimeout(connect, 2000); };
+    ws.onerror = () => ws.close();
+    ws.onmessage = (msg) => {
+      let ev;
+      try { ev = JSON.parse(msg.data); } catch (e) { return; }
+      if (ev.kind === 'decode') renderDecode(ev);
+      else if (ev.kind === 'status') renderStatus(ev);
+      else if (ev.kind === 'clear') {
+        bandBody.innerHTML = ''; rxFreqBody.innerHTML = '';
+        timeGroups.band.lastTime = timeGroups.rxfreq.lastTime = null;
+        timeGroups.band.alt = timeGroups.rxfreq.alt = false;
+        wf.clear();
+      }
+    };
+  }
+  loadCachedStatus();
+  connect();
+
+  function showResult(el, ok, msg) {
+    el.textContent = msg || (ok ? 'OK' : 'Failed');
+    el.className = 'action-result ' + (ok ? 'ok' : 'err');
+    setTimeout(() => { el.textContent = ''; }, 4000);
+  }
+
+  function postJson(url, body) {
+    return fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}),
+    }).then(r => r.json());
+  }
+
+  // -- GUI-scripting bridge (wsjtx_gui_bridge.py): drives WSJT-X's own
+  // window directly via AppleScript/Accessibility for the few controls with
+  // no UDP equivalent -- Stop, Monitor, Decode, and the band/mode buttons.
+  // Enable Tx and Tune are deliberately NOT wired here -- see
+  // wsjtx_gui_bridge.py's module docstring (2026-07-16: toggles the
+  // checkbox's visible state but doesn't actually key the transmitter).
+  // Requires WSJT-X running and this app to have Accessibility permission
+  // (System Settings -> Privacy & Security -> Accessibility); errors from
+  // that surface in guiBridgeHint rather than failing silently, since
+  // "permission not granted yet" is an expected
+  // first-run state, not a bug.
+  const WSJTX_MODE_BUTTON = { FT8: 'FT8', FT4: 'FT4', MSK144: 'MSK', Q65: 'Q65', JT65: 'JT65' };
+
+  function guiButtonClick(name) {
+    return postJson('/remote/gui/button', { name }).then(d => {
+      if (!d.ok) { guiBridgeHint.textContent = d.error; guiBridgeHint.className = 'proc-hint err'; }
+      return d;
+    });
+  }
+
+  function guiSetCheckbox(el, name) {
+    postJson('/remote/gui/checkbox', { name, on: el.checked }).then(d => {
+      if (!d.ok) {
+        guiBridgeHint.textContent = d.error;
+        guiBridgeHint.className = 'proc-hint err';
+        el.checked = !el.checked; // revert -- the click didn't actually take
+      } else {
+        el.checked = d.value;
+      }
+    });
+  }
+
+  function pollGuiStatus() {
+    fetch('/remote/gui/status').then(r => r.json()).then(d => {
+      if (!d.ok) {
+        guiBridgeHint.textContent = d.error;
+        guiBridgeHint.className = 'proc-hint err';
+        return;
+      }
+      guiBridgeHint.textContent = '';
+      guiBridgeHint.className = 'proc-hint';
+      const cb = d.checkboxes;
+      if (document.activeElement !== guiMonitor) guiMonitor.checked = cb['Monitor'];
+      if (document.activeElement !== guiDecode) guiDecode.checked = cb['Decode'];
+    }).catch(() => {});
+  }
+
+  guiStopBtn.addEventListener('click', () => guiButtonClick('Stop'));
+  guiMonitor.addEventListener('change', () => guiSetCheckbox(guiMonitor, 'Monitor'));
+  guiDecode.addEventListener('change', () => guiSetCheckbox(guiDecode, 'Decode'));
+
+  bandRow.querySelectorAll('.band-btn').forEach(btn => {
+    btn.addEventListener('click', () => guiButtonClick(btn.textContent.trim()));
+  });
+
+  pollGuiStatus();
+  setInterval(pollGuiStatus, 4000);
+
+  modeStack.querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      modeStack.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const wsjtxName = WSJTX_MODE_BUTTON[btn.dataset.mode];
+      if (wsjtxName) guiButtonClick(wsjtxName);
+    });
+  });
+
+  document.getElementById('ft-submit').addEventListener('click', () => {
+    const text = document.getElementById('ft-text').value;
+    const send = document.getElementById('ft-send').checked;
+    const result = document.getElementById('ft-result');
+    postJson('/remote/free_text', { text, send })
+      .then(d => showResult(result, !d.error && d.ok, d.error || (d.ok ? 'Sent' : 'Not sent -- no known WSJT-X address yet')))
+      .catch(e => showResult(result, false, String(e)));
+  });
+
+  document.getElementById('halt-btn').addEventListener('click', () => {
+    postJson('/remote/halt_tx', { auto_tx_only: false }).catch(() => {});
+  });
+
+  document.getElementById('erase-btn').addEventListener('click', () => {
+    // Clear locally right away for immediate feedback -- not certain WSJT-X
+    // echoes its own Clear back out over UDP when *we* send it one (as
+    // opposed to when the user clicks the real Erase button), so don't
+    // rely on that round trip.
+    bandBody.innerHTML = '';
+    rxFreqBody.innerHTML = '';
+    timeGroups.band.lastTime = timeGroups.rxfreq.lastTime = null;
+    timeGroups.band.alt = timeGroups.rxfreq.alt = false;
+    wf.clear();
+    postJson('/remote/erase', { window: 0 }).catch(() => {});
+  });
+
+  document.getElementById('cfg-submit').addEventListener('click', () => {
+    const result = document.getElementById('cfg-result');
+    const activeMode = modeStack.querySelector('button.active');
+    postJson('/remote/configure', {
+      mode: activeMode ? activeMode.dataset.mode : 'FT8',
+      tr_period: parseInt(document.getElementById('cfg-tr').value, 10) || 15,
+      dx_call: document.getElementById('cfg-dxcall').value,
+      dx_grid: document.getElementById('cfg-dxgrid').value,
+      rx_df: parseInt(document.getElementById('cfg-rxdf').value, 10) || 1500,
+      frequency_tolerance: parseInt(document.getElementById('cfg-tol').value, 10) || 10,
+      fast_mode: document.getElementById('cfg-fast').checked,
+      generate_messages: document.getElementById('cfg-genmsg').checked,
+    })
+      .then(d => showResult(result, !d.error && d.ok, d.error || (d.ok ? 'Sent' : 'Not sent')))
+      .catch(e => showResult(result, false, String(e)));
+  });
+
+  // -- Log QSO: preview WSJT-X's current tracked exchange, let the operator
+  // review/edit, then write it directly (see log_writer.py for why) --
+  const logQsoOverlay = document.getElementById('log-qso-overlay');
+  const logQsoError = document.getElementById('log-qso-error');
+  const logQsoFields = ['mycall', 'mygrid', 'call', 'grid', 'mode', 'band', 'rstsent', 'rstrcvd', 'freq', 'dxcc', 'dxccid', 'cqzone', 'comments'];
+  const logQsoFieldToKey = {
+    mycall: 'my_call', mygrid: 'my_grid', call: 'call', grid: 'grid', mode: 'mode', band: 'band',
+    rstsent: 'rst_sent', rstrcvd: 'rst_received', freq: 'tx_frequency_mhz',
+    dxcc: 'dxcc_country', dxccid: 'dxcc_id', cqzone: 'cq_zone', comments: 'comments',
+  };
+
+  function openLogQso() {
+    logQsoError.style.display = 'none';
+    document.getElementById('log-qso-result').textContent = '';
+    fetch('/remote/log_qso/preview').then(r => r.json()).then(data => {
+      if (data.error) {
+        logQsoError.textContent = data.error;
+        logQsoError.style.display = 'block';
+      }
+      logQsoFields.forEach(f => {
+        const key = logQsoFieldToKey[f];
+        const val = data[key];
+        document.getElementById('lq-' + f).value = (val === null || val === undefined) ? '' : val;
+      });
+      logQsoOverlay.style.display = 'flex';
+    }).catch(e => {
+      logQsoError.textContent = String(e);
+      logQsoError.style.display = 'block';
+      logQsoOverlay.style.display = 'flex';
+    });
+  }
+
+  function submitToQueue() {
+    const result = document.getElementById('log-qso-result');
+    const body = {};
+    logQsoFields.forEach(f => { body[logQsoFieldToKey[f]] = document.getElementById('lq-' + f).value; });
+    postJson('/remote/qso_queue', body).then(d => {
+      if (d.error) { showResult(result, false, d.error); return; }
+      showResult(result, true, 'Added to queue');
+      renderQueue(d.queue);
+      setTimeout(() => { logQsoOverlay.style.display = 'none'; }, 900);
+    }).catch(e => showResult(result, false, String(e)));
+  }
+
+  document.getElementById('log-qso-btn').addEventListener('click', openLogQso);
+  document.getElementById('log-qso-cancel').addEventListener('click', () => { logQsoOverlay.style.display = 'none'; });
+  document.getElementById('log-qso-confirm').addEventListener('click', submitToQueue);
+
+  // -- Queued QSOs panel --
+  const qsoQueueBody = document.getElementById('qso-queue-body');
+
+  function fmtQueuedAt(epochS) {
+    return fmtUtc(epochS);
+  }
+
+  function renderQueue(entries) {
+    qsoQueueBody.innerHTML = '';
+    entries.slice().reverse().forEach(e => {
+      const tr = document.createElement('tr');
+      const statusLabel = e.status === 'error' ? `error: ${e.error || ''}` : e.status;
+      tr.innerHTML = `
+        <td>${fmtQueuedAt(e.queued_at)}</td>
+        <td>${e.call}</td>
+        <td>${e.band}</td>
+        <td>${e.mode}</td>
+        <td>${statusLabel}</td>
+        <td></td>
+      `;
+      const actionCell = tr.lastElementChild;
+      if (e.status !== 'sent') {
+        const sendBtn = document.createElement('button');
+        sendBtn.textContent = 'Send';
+        sendBtn.addEventListener('click', () => sendQueueEntry(e.id));
+        actionCell.appendChild(sendBtn);
+      }
+      const delBtn = document.createElement('button');
+      delBtn.textContent = 'Delete';
+      delBtn.style.marginLeft = '0.3rem';
+      delBtn.addEventListener('click', () => deleteQueueEntry(e.id));
+      actionCell.appendChild(delBtn);
+      qsoQueueBody.appendChild(tr);
+    });
+  }
+
+  function loadQueue() {
+    fetch('/remote/qso_queue').then(r => r.json()).then(d => renderQueue(d.queue || [])).catch(() => {});
+  }
+
+  function sendQueueEntry(id, force) {
+    postJson(`/remote/qso_queue/${id}/send`, { force: !!force }).then(d => {
+      if (d.error === 'possible_duplicate') {
+        if (confirm('A QSO with this call/band/mode was already logged recently -- possible duplicate. Send anyway?')) {
+          sendQueueEntry(id, true);
+        }
+        return;
+      }
+      if (!d.ok) alert('Failed to send to MacLoggerDX: ' + (d.message || d.error || 'unknown error'));
+      loadQueue();
+    }).catch(e => alert('Failed to send: ' + e));
+  }
+
+  function deleteQueueEntry(id) {
+    postJson(`/remote/qso_queue/${id}/delete`, {}).then(d => renderQueue(d.queue || [])).catch(() => {});
+  }
+
+  const queueBatchResult = document.getElementById('queue-batch-result');
+
+  document.getElementById('queue-send-all').addEventListener('click', () => {
+    queueBatchResult.textContent = 'Sending…';
+    queueBatchResult.className = 'action-result';
+    postJson('/remote/qso_queue/send_all', {}).then(d => {
+      const results = d.results || [];
+      const sent = results.filter(r => r.ok).length;
+      const dups = results.filter(r => r.error === 'possible_duplicate').length;
+      const failed = results.length - sent - dups;
+      let msg = `${sent} sent`;
+      if (dups) msg += `, ${dups} skipped (possible duplicate -- send individually to override)`;
+      if (failed) msg += `, ${failed} failed`;
+      if (!results.length) msg = 'Nothing pending';
+      queueBatchResult.textContent = msg;
+      queueBatchResult.className = 'action-result ' + (failed ? 'err' : 'ok');
+      renderQueue(d.queue || []);
+    }).catch(e => { queueBatchResult.textContent = String(e); queueBatchResult.className = 'action-result err'; });
+  });
+
+  document.getElementById('queue-clear-sent').addEventListener('click', () => {
+    postJson('/remote/qso_queue/clear_sent', {}).then(d => renderQueue(d.queue || [])).catch(() => {});
+  });
+
+  loadQueue();
+})();
+</script>
+{% endblock %}

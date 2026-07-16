@@ -480,6 +480,81 @@ def build_highlight_callsign(
     return b"".join(parts)
 
 
+def build_clear(client_id: str, window: int = 0) -> bytes:
+    """
+    Build a Clear (3) message -- equivalent to clicking "Erase". `window`:
+    0 = both Band Activity and Rx Frequency, 1 = Band Activity only,
+    2 = Rx Frequency only.
+    """
+    parts = []
+    _pack_header(parts, client_id, MSG_CLEAR)
+    parts.append(struct.pack(">B", window))
+    return b"".join(parts)
+
+
+def build_free_text(client_id: str, text: str, send: bool = False) -> bytes:
+    """
+    Build a FreeText (9) message -- equivalent to typing into WSJT-X's Free
+    Text box. If `send` is True, WSJT-X also switches to transmitting this
+    text on the next Tx slot (like ticking "Tx N" on the free-text box);
+    if False it just populates the box without keying anything.
+    """
+    parts = []
+    _pack_header(parts, client_id, MSG_FREE_TEXT)
+    _write_qstring(parts, text)
+    parts.append(struct.pack(">B", 1 if send else 0))
+    return b"".join(parts)
+
+
+def build_halt_tx(client_id: str, auto_tx_only: bool = False) -> bytes:
+    """
+    Build a HaltTx (8) message -- equivalent to clicking "Halt Tx". If
+    `auto_tx_only` is True, only halts if WSJT-X is in automatic (Enable
+    Tx) sequencing; if False, halts unconditionally.
+    """
+    parts = []
+    _pack_header(parts, client_id, MSG_HALT_TX)
+    parts.append(struct.pack(">B", 1 if auto_tx_only else 0))
+    return b"".join(parts)
+
+
+def build_configure(
+    client_id: str,
+    mode: str,
+    frequency_tolerance: int = 10,
+    submode: Optional[str] = None,
+    fast_mode: bool = False,
+    tr_period: int = 15,
+    rx_df: int = 1500,
+    dx_call: str = "",
+    dx_grid: str = "",
+    generate_messages: bool = True,
+) -> bytes:
+    """
+    Build a Configure (15) message -- sets WSJT-X's mode and several
+    operating parameters remotely (roughly: the mode buttons, T/R period,
+    and DX call/grid fields in the main window).
+
+    NOTE: this message type is less commonly implemented by third-party
+    WSJT-X companion tools than Decode/Status/Reply/HaltTx/FreeText, so
+    confidence in this exact field layout (from NetworkMessage.hpp) is
+    lower than the rest of this module -- test carefully against a real
+    WSJT-X instance before relying on it.
+    """
+    parts = []
+    _pack_header(parts, client_id, MSG_CONFIGURE)
+    _write_qstring(parts, mode)
+    parts.append(struct.pack(">I", frequency_tolerance))
+    _write_qstring(parts, submode)
+    parts.append(struct.pack(">B", 1 if fast_mode else 0))
+    parts.append(struct.pack(">I", tr_period))
+    parts.append(struct.pack(">I", rx_df))
+    _write_qstring(parts, dx_call)
+    _write_qstring(parts, dx_grid)
+    parts.append(struct.pack(">B", 1 if generate_messages else 0))
+    return b"".join(parts)
+
+
 # ---------------------------------------------------------------------------
 # asyncio listener
 # ---------------------------------------------------------------------------

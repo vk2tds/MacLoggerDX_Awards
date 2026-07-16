@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Waterfall{% endblock %}
+{% block content %}
+<h1>Waterfall</h1>
+<p style="color:#666; font-size:0.85rem; max-width:60em; margin-top:-0.5rem;">
+  Standalone view of the same decode-based waterfall shown on the <a href="{{ url_for('remote.remote_view') }}">Remote</a>
+  tab -- always visible here regardless of that tab's show/hide checkbox, meant for keeping open on a second
+  monitor.
+</p>
+
+<style>
+  .waterfall-shell { overflow-x: auto; background: #07143a; border: 1px solid #b8b8b8; border-radius: 4px; }
+  #waterfall-canvas { display: block; }
+  .waterfall-caption { font-size: 0.7rem; color: #888; margin: 0.25rem 0 0.75rem; }
+  .waterfall-toolbar { display: flex; align-items: center; gap: 1rem; font-size: 0.85rem; margin-bottom: 0.4rem; }
+  .waterfall-toolbar label { display: flex; align-items: center; gap: 0.3rem; }
+  .waterfall-toolbar input[type=number] { width: 4em; }
+  .conn-dot { display: inline-block; width: 0.7rem; height: 0.7rem; border-radius: 50%; background: #999; margin-right: 0.3rem; }
+  .conn-dot.up { background: #2e9c4a; }
+  .conn-dot.down { background: #c62828; }
+</style>
+
+<div class="waterfall-toolbar">
+  <label>Rows <input id="wf-rows" type="number" min="2" max="120" value="30"></label>
+  <span><span class="conn-dot" id="conn-dot"></span><span id="conn-text">connecting…</span></span>
+</div>
+<div class="waterfall-shell">
+  <canvas id="waterfall-canvas" width="900" height="676"></canvas>
+</div>
+<p class="waterfall-caption">
+  Decode-based waterfall -- WSJT-X's UDP API has no spectrum/noise-floor data, so this shows only signals it
+  actually decoded (colored by SNR), one row per decode cycle. Not a true spectrogram.
+</p>
+
+<script src="{{ url_for('static', filename='waterfall.js') }}"></script>
+<script>
+(function () {
+  const wfRowsInput = document.getElementById('wf-rows');
+  const dot = document.getElementById('conn-dot');
+  const connText = document.getElementById('conn-text');
+  const savedRows = parseInt(localStorage.getItem('wf_rows_standalone'), 10);
+  const wf = createWaterfall(document.getElementById('waterfall-canvas'), { rows: savedRows || 30 });
+  wfRowsInput.value = wf.rows;
+
+  wfRowsInput.addEventListener('change', () => {
+    const n = wf.resize(parseInt(wfRowsInput.value, 10));
+    wfRowsInput.value = n;
+    localStorage.setItem('wf_rows_standalone', String(n));
+  });
+
+  function connect() {
+    const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+    const ws = new WebSocket(proto + location.host + '/live/ws');
+    ws.onopen = () => { dot.className = 'conn-dot up'; connText.textContent = 'connected'; };
+    ws.onclose = () => { dot.className = 'conn-dot down'; connText.textContent = 'disconnected -- retrying...'; setTimeout(connect, 2000); };
+    ws.onerror = () => ws.close();
+    ws.onmessage = (msg) => {
+      let ev;
+      try { ev = JSON.parse(msg.data); } catch (e) { return; }
+      if (ev.kind === 'decode') wf.onDecode(ev);
+      else if (ev.kind === 'clear') wf.clear();
+    };
+  }
+  connect();
+})();
+</script>
+{% endblock %}

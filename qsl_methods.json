@@ -4,6 +4,47 @@
     "method": "Bureau",
     "cost": "",
     "notes": "Slow bureau, allow a year",
-    "updated": "2026-07-12T19:18:15"
+    "updated": "2026-07-14T19:28:29",
+    "status": "pending"
+  },
+  {
+    "call": "BV400",
+    "method": "",
+    "cost": "",
+    "notes": "Not in their log",
+    "status": "pending",
+    "updated": "2026-07-14T20:12:29"
+  },
+  {
+    "call": "A35RC",
+    "method": "Direct",
+    "cost": "",
+    "notes": "Russia",
+    "status": "pending",
+    "updated": "2026-07-14T20:14:52"
+  },
+  {
+    "call": "9Y4DG",
+    "method": "",
+    "cost": "",
+    "notes": "In log",
+    "status": "pending",
+    "updated": "2026-07-14T20:18:28"
+  },
+  {
+    "call": "TL8GD",
+    "method": "",
+    "cost": "",
+    "notes": "Not found in log",
+    "status": "pending",
+    "updated": "2026-07-14T20:24:17"
+  },
+  {
+    "call": "EX7DY",
+    "method": "",
+    "cost": "",
+    "notes": "Emailed. Not on clublog",
+    "status": "pending",
+    "updated": "2026-07-15T15:27:04"
   }
 ]

@@ -26,6 +26,7 @@ See INTEGRATION.md in this folder for the exact app.py diff.
 from __future__ import annotations
 
 import dataclasses
+import datetime
 import json
 import logging
 import queue
@@ -42,12 +43,17 @@ from wsjtx_udp import (
     MSG_QSO_LOGGED,
     MSG_STATUS,
     WsjtxMessage,
+    build_clear,
+    build_configure,
+    build_free_text,
+    build_halt_tx,
     build_reply,
     run_listener,
 )
 from ft8_parser import parse_message, base_callsign
 from dxcc_lookup import DxccResolver
 from log_status import LogStatusChecker
+import qsl_helper
 
 log = logging.getLogger("live_monitor")
 
@@ -57,6 +63,16 @@ _BAND_TABLE = [
     (21.0, 21.45, "15M"), (24.89, 24.99, "12M"), (28.0, 29.7, "10M"),
     (50.0, 54.0, "6M"), (70.0, 70.5, "4M"), (144.0, 148.0, "2M"),
 ]
+
+# Fallback T/R period per mode, used only when WSJT-X's last reported
+# Status didn't have a usable value (it sometimes reports the quint32
+# "not available" sentinel 0xFFFFFFFF for this field).
+_DEFAULT_TR_PERIOD_BY_MODE = {
+    "FT8": 15, "FT4": 6, "JT9": 15, "JT65": 60, "MSK144": 15,
+    "Q65": 60, "WSPR": 120, "FST4": 60, "FST4W": 120,
+}
+_SANE_TR_PERIOD_RANGE = (1, 1800)
+_SANE_FREQ_TOLERANCE_RANGE = (1, 1000)
 
 
 def freq_to_band(hz: Optional[int]) -> Optional[str]:
@@ -115,6 +131,11 @@ class LiveMonitor:
         self._thread: Optional[threading.Thread] = None
         self._loop = None
         self._transport = None
+        # Updated on every inbound message (not just decodes) so the Remote
+        # control panel always has somewhere current to send commands, even
+        # before the user has double-clicked anything.
+        self._last_wsjtx_addr: Optional[tuple] = None
+        self._last_wsjtx_id: Optional[str] = None
 
     # -- lifecycle -------------------------------------------------------
 
@@ -144,14 +165,24 @@ class LiveMonitor:
         while True:
             await asyncio.sleep(3600)
 
-    # -- double-click-to-call: reply to WSJT-X on the same socket we're
-    # listening with, mimicking a double-click on a decode in WSJT-X itself --
+    # -- sending commands back to WSJT-X, on the same socket we're
+    # listening with --------------------------------------------------------
+
+    def _send_to_wsjtx(self, label: str, data: bytes, dest: Optional[tuple] = None) -> bool:
+        dest = dest or self._last_wsjtx_addr
+        if not dest or self._transport is None or self._loop is None:
+            log.warning("Cannot send WSJT-X %s -- listener not ready or no known WSJT-X address yet", label)
+            return False
+        self._loop.call_soon_threadsafe(self._transport.sendto, data, dest)
+        log.info("Sent WSJT-X %s to %s", label, dest)
+        return True
 
     def send_reply(self, event: dict) -> bool:
+        """Double-click-to-call: mimics double-clicking a decode in WSJT-X."""
         raw = event.get("raw") or {}
         source = event.get("source")
-        if not source or self._transport is None or self._loop is None:
-            log.warning("Cannot send WSJT-X reply -- listener not ready or no source address")
+        if not source:
+            log.warning("Cannot send WSJT-X reply -- event has no source address")
             return False
         try:
             data = build_reply(
@@ -167,14 +198,90 @@ class LiveMonitor:
         except Exception:
             log.exception("Failed to build WSJT-X reply for %s", raw.get("message"))
             return False
-        dest = (source[0], source[1])
-        self._loop.call_soon_threadsafe(self._transport.sendto, data, dest)
-        log.info("Sent WSJT-X reply for %r to %s", raw.get("message"), dest)
-        return True
+        return self._send_to_wsjtx(f"reply {raw.get('message')!r}", data, tuple(source))
+
+    def handle_reply_action(self, event: dict) -> bool:
+        """Entry point for the "double-click a decode to call" gesture from
+        the front end. WSJT-X's Reply UDP message is hard-filtered by WSJT-X
+        itself to only accept messages that look like a CQ or QRZ call (per
+        a WSJT-X developer on the wsjt-devel list) -- it silently ignores
+        anything else, regardless of what any external tool sends. For a
+        non-CQ decode we fall back to Configure, which sets DX Call/Grid
+        directly and isn't subject to that filter."""
+        if event.get("is_cq"):
+            return self.send_reply(event)
+        return self.send_call_via_configure(event)
+
+    def send_call_via_configure(self, event: dict) -> bool:
+        call = event.get("call")
+        if not call:
+            log.warning("Cannot Configure-call -- event has no call")
+            return False
+        mode = event.get("mode") or self.wsjtx_status.get("mode") or "FT8"
+        grid = event.get("grid") or ""
+        rx_df = event.get("delta_freq_hz")
+        if not isinstance(rx_df, int):
+            rx_df = self.wsjtx_status.get("rx_df") if isinstance(self.wsjtx_status.get("rx_df"), int) else 1500
+
+        tr_period = self.wsjtx_status.get("tr_period")
+        if not (isinstance(tr_period, int) and _SANE_TR_PERIOD_RANGE[0] <= tr_period <= _SANE_TR_PERIOD_RANGE[1]):
+            tr_period = _DEFAULT_TR_PERIOD_BY_MODE.get(mode, 15)
+
+        freq_tolerance = self.wsjtx_status.get("frequency_tolerance")
+        if not (isinstance(freq_tolerance, int)
+                and _SANE_FREQ_TOLERANCE_RANGE[0] <= freq_tolerance <= _SANE_FREQ_TOLERANCE_RANGE[1]):
+            freq_tolerance = 10
+
+        return self.send_configure(
+            mode=mode,
+            frequency_tolerance=freq_tolerance,
+            submode=self.wsjtx_status.get("sub_mode"),
+            fast_mode=bool(self.wsjtx_status.get("fast_mode")),
+            tr_period=tr_period,
+            rx_df=rx_df,
+            dx_call=call,
+            dx_grid=grid,
+            generate_messages=True,
+        )
+
+    def send_free_text(self, text: str, send: bool = False) -> bool:
+        try:
+            data = build_free_text(client_id=self._last_wsjtx_id or "WSJT-X", text=text, send=send)
+        except Exception:
+            log.exception("Failed to build WSJT-X FreeText for %r", text)
+            return False
+        return self._send_to_wsjtx(f"FreeText {text!r} (send={send})", data)
+
+    def send_clear(self, window: int = 0) -> bool:
+        try:
+            data = build_clear(client_id=self._last_wsjtx_id or "WSJT-X", window=window)
+        except Exception:
+            log.exception("Failed to build WSJT-X Clear")
+            return False
+        return self._send_to_wsjtx("Clear", data)
+
+    def send_halt_tx(self, auto_tx_only: bool = False) -> bool:
+        try:
+            data = build_halt_tx(client_id=self._last_wsjtx_id or "WSJT-X", auto_tx_only=auto_tx_only)
+        except Exception:
+            log.exception("Failed to build WSJT-X HaltTx")
+            return False
+        return self._send_to_wsjtx("HaltTx", data)
+
+    def send_configure(self, **kwargs) -> bool:
+        try:
+            data = build_configure(client_id=self._last_wsjtx_id or "WSJT-X", **kwargs)
+        except Exception:
+            log.exception("Failed to build WSJT-X Configure with %r", kwargs)
+            return False
+        return self._send_to_wsjtx(f"Configure {kwargs}", data)
 
     # -- WSJT-X message handling -----------------------------------------
 
     def _on_message(self, msg: WsjtxMessage):
+        self._last_wsjtx_addr = msg.source
+        if msg.id:
+            self._last_wsjtx_id = msg.id
         try:
             if msg.type == MSG_DECODE:
                 self._handle_decode(msg)
@@ -269,6 +376,7 @@ class LiveMonitor:
             "is_cq": parsed.is_cq,
             "cq_directed": parsed.cq_directed,
             "cq_area_mismatch": cq_area_mismatch,
+            "to_call": parsed.to_call,
             "call": call,
             "base_call": base,
             "grid": parsed.grid,
@@ -334,6 +442,13 @@ live_bp = Blueprint("live", __name__, template_folder="templates")
 _monitor: Optional[LiveMonitor] = None
 
 
+def get_monitor() -> Optional[LiveMonitor]:
+    """Accessor for other blueprints (e.g. wsjtx_remote.py) that want to
+    reuse the single shared UDP listener/transport rather than opening a
+    second one."""
+    return _monitor
+
+
 def init_live_monitor(app, sock, config: LiveMonitorConfig) -> LiveMonitor:
     """Create the LiveMonitor, register the blueprint + websocket route,
     and start the background UDP listener thread. Call this once at
@@ -374,7 +489,7 @@ def init_live_monitor(app, sock, config: LiveMonitorConfig) -> LiveMonitor:
                 except (TypeError, ValueError):
                     continue
                 if isinstance(cmd, dict) and cmd.get("action") == "reply":
-                    _monitor.send_reply(cmd.get("event") or {})
+                    _monitor.handle_reply_action(cmd.get("event") or {})
         except Exception:
             pass
         finally:
@@ -398,6 +513,45 @@ def live_history():
     if _monitor is None:
         return jsonify([])
     return jsonify(_monitor.history_snapshot())
+
+
+@live_bp.route("/live/callsign/<call>")
+def callsign_history(call):
+    """Combined history for one callsign: MacLoggerDX log summary (worked/
+    confirmed, bands, grids) plus every ALL.TXT exchange line ever indexed
+    for them (reuses qsl_helper's shared cache rather than re-indexing)."""
+    if _monitor is None:
+        return jsonify({"error": "Live monitor not initialised"}), 503
+    call = call.strip().upper()
+    base = base_callsign(call) or call
+
+    db_status = _monitor.status_checker.lookup(call, base_callsign=base)
+    entity = _monitor.dxcc_resolver.lookup(call) if _monitor.dxcc_resolver else None
+
+    lines = []
+    cache = qsl_helper.get_cache()
+    if cache is not None:
+        rows = cache.find_exchange(call, near_epoch=None)
+        for ts, rxtx, freq_mhz, mode, snr, dt, df, msg, raw in rows:
+            lines.append({
+                "ts": ts,
+                "time": datetime.datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S"),
+                "rxtx": rxtx, "freq_mhz": freq_mhz, "mode": mode, "snr": snr, "msg": msg, "raw": raw,
+            })
+
+    return jsonify({
+        "call": call,
+        "worked_before": db_status.worked_before,
+        "qso_count": db_status.qso_count,
+        "confirmed_ever": db_status.confirmed_ever,
+        "confirmed_lotw_ever": db_status.confirmed_lotw_ever,
+        "dxcc_country": db_status.dxcc_country or (entity.name if entity else None),
+        "dxcc_id": db_status.dxcc_id if db_status.dxcc_id is not None else (entity.dxcc_id if entity else None),
+        "grids_worked": db_status.grids_worked,
+        "db_error": db_status.error,
+        "exchange_lines": lines,
+        "exchange_count": len(lines),
+    })
 
 
 @live_bp.route("/live/config", methods=["GET", "POST"])

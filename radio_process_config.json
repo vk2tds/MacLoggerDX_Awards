@@ -1,0 +1,9 @@
+{
+  "rig_model": 3073,
+  "device": "/dev/cu.usbserial-11210",
+  "baud": null,
+  "listen_host": "127.0.0.1",
+  "listen_port": 4532,
+  "extra_args": "",
+  "binary_path": ""
+}

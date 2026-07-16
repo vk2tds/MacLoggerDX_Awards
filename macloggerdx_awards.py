@@ -46,6 +46,20 @@ logging.getLogger().addHandler(console)
 log = logging.getLogger("app." + __name__)
 
 
+# Known bad/inconsistent 'country' spellings in the log (old manual entries,
+# case differences, MacLoggerDX's own DXCC lookup changing over time, etc.)
+# that would otherwise split one DXCC entity into multiple rows on the
+# Challenge grid. Each variant maps to whichever spelling already dominates
+# in this log, so the grid -- and any exact-string match against
+# qsl_tracking.json's manually tracked entries -- keeps working as expected.
+COUNTRY_NAME_ALIASES = {
+    'United States of America': 'United States',
+    'AMERICAN SAMOA': 'American Samoa',
+}
+
+
+def normalize_country(name):
+    return COUNTRY_NAME_ALIASES.get(name, name)
 
 
 
@@ -371,7 +385,7 @@ class analysis():
         stats = {}
         for dxcc, day in res.fetchall():
             if dxcc != last_dxcc:
-                day = str(datetime.datetime.fromtimestamp(day))
+                day = str(datetime.datetime.utcfromtimestamp(day))
                 stats[dxcc] = day[:19]
                 last_dxcc = dxcc
         stats = {k: v for k, v in sorted(stats.items(), key=lambda item: item[1])}    
@@ -463,6 +477,7 @@ class analysis():
         res = self.cur.execute (dxcc_qso_confirmed)
         detailsQ = res.fetchall()
         for count, band_tx, dxcc_country in detailsQ:
+            dxcc_country = normalize_country(dxcc_country)
             if not dxcc_country in working:
                 working[dxcc_country] = OrderedDict()
                 working[dxcc_country]['160M'] = None
@@ -476,22 +491,30 @@ class analysis():
                 working[dxcc_country]['10M'] = None
                 working[dxcc_country]['6M'] = None
             if band_tx in working[dxcc_country]:
-                working[dxcc_country][band_tx] = str(count) + ',0,0'
+                # Multiple raw spellings can normalize to the same country
+                # (COUNTRY_NAME_ALIASES) and each contribute their own SQL
+                # GROUP BY row for the same band -- accumulate rather than
+                # overwrite so every variant's QSOs are still counted.
+                existing = working[dxcc_country][band_tx]
+                prev_qso = int(existing.split(',')[0]) if existing else 0
+                working[dxcc_country][band_tx] = str(count + prev_qso) + ',0,0'
 
         res = self.cur.execute (dxcc_lotw_confirmed)
         detailsL = res.fetchall()
         for count, band_tx, dxcc_country in detailsL:
+            dxcc_country = normalize_country(dxcc_country)
             s = working[dxcc_country][band_tx]
             (qso, lotw, card) = s.split(',')
-            lotw = count
+            lotw = int(lotw) + count
             working[dxcc_country][band_tx] = str(qso) + ',' + str(lotw)+',' + str(card)
 
         res = self.cur.execute (dxcc_card_confirmed)
         detailsC = res.fetchall()
         for count, band_tx, dxcc_country in detailsC:
+            dxcc_country = normalize_country(dxcc_country)
             s = working[dxcc_country][band_tx]
             (qso, lotw, card) = s.split(',')
-            card = count
+            card = int(card) + count
             working[dxcc_country][band_tx] = str(qso) + ',' + str(lotw)+',' + str(card)
 
         for country in working:
@@ -557,11 +580,17 @@ class analysis():
         for line in required:
             country = line['Country']
             band = line['Band']
+            # `country` here is the normalized name -- match every raw
+            # spelling that folds into it (COUNTRY_NAME_ALIASES), not just
+            # that exact string, or QSOs logged under an alias would be
+            # silently missed.
+            variants = [country] + [k for k, v in COUNTRY_NAME_ALIASES.items() if v == country]
+            placeholders = ' or '.join(["dxcc_country = ?"] * len(variants))
             query = "select call, qso_start from "+ self.qso_table + ' where '
             query += " not call like '%/MM' "
-            query += "and band_tx = '" + band + "' and dxcc_country = '" + country + "'"
+            query += "and band_tx = ? and (" + placeholders + ")"
 
-            res = self.cur.execute (query)
+            res = self.cur.execute (query, [band] + variants)
             details = res.fetchall()
 
             line['Calls'] = details

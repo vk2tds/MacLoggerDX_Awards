@@ -24,21 +24,20 @@ import json
 import logging
 import os
 import re
+import shutil
 import sqlite3
 import threading
 import time
+import urllib.error
+import urllib.request
 from typing import Optional
 
 from flask import Blueprint, jsonify, render_template, request
 
+from dxcc_lookup import DxccResolver
 from ft8_parser import base_callsign, parse_message
 
 log = logging.getLogger("qsl_helper")
-
-CONFIRMED_LIKE = (
-    "(qsl_received LIKE '%LoTW%' OR qsl_received LIKE '%eQSL%' "
-    "OR qsl_received LIKE '%CardC%' OR qsl_received LIKE '%Card%')"
-)
 
 # How far around a logged QSO's timestamp to search ALL.TXT for the actual
 # over-the-air exchange. Generous on purpose: MacLoggerDX's qso_start isn't
@@ -50,15 +49,20 @@ MATCH_WINDOW_AFTER_S = 30 * 60
 # treated as "stale" rather than "recently active".
 LOTW_RECENT_DAYS = 730
 
+# ARRL's official published snapshot -- one row per LoTW user, refreshed daily.
+LOTW_ACTIVITY_URL = "https://lotw.arrl.org/lotw-user-activity.csv"
+
 
 @dataclasses.dataclass
 class QslHelperConfig:
     database_path: str
     qso_table: str
+    dxcc_file: str = "dxcc.txt"
     my_calls: tuple = ("VK2TDS",)
     alltxt_path: str = "/Users/darryl/Library/Application Support/WSJT-X/ALL.TXT"
     lotw_activity_file: str = "lotw-user-activity.csv"
     qsl_methods_file: str = "qsl_methods.json"
+    not_in_log_file: str = "qsl_not_in_log.json"
     cache_db_path: str = "alltxt_cache.sqlite"
     resync_interval_s: float = 60.0
 
@@ -148,10 +152,20 @@ class AllTxtCache:
         self._db.execute(
             "CREATE TABLE IF NOT EXISTS lines ("
             "ts REAL, rxtx TEXT, freq_mhz REAL, mode TEXT, snr INTEGER, dt REAL, df INTEGER, "
-            "msg TEXT, other_call TEXT, UNIQUE(ts, rxtx, msg))"
+            "msg TEXT, other_call TEXT, raw TEXT, UNIQUE(ts, rxtx, msg))"
         )
         self._db.execute("CREATE INDEX IF NOT EXISTS idx_lines_other_call ON lines(other_call)")
         self._db.execute("CREATE TABLE IF NOT EXISTS sync_state (path TEXT PRIMARY KEY, offset INTEGER)")
+        # Migration: older caches predate the 'raw' column (added so exchange
+        # lines can be displayed verbatim, unchanged from ALL.TXT, rather than
+        # reconstructed from parsed fields). If it's missing, add it and force
+        # a full re-index so every row gets backfilled -- correctness over
+        # avoiding the one-time re-scan cost.
+        cols = {row[1] for row in self._db.execute("PRAGMA table_info(lines)").fetchall()}
+        if "raw" not in cols:
+            self._db.execute("ALTER TABLE lines ADD COLUMN raw TEXT")
+            self._db.execute("DELETE FROM lines")
+            self._db.execute("DELETE FROM sync_state")
         self._db.commit()
         self._thread: Optional[threading.Thread] = None
         self.status = {"state": "idle", "file_size": 0, "bytes_indexed": 0, "lines_indexed": 0, "error": None,
@@ -210,7 +224,8 @@ class AllTxtCache:
                     other = _other_call_for(parsed["msg"], self._my_bases)
                     if other:
                         batch.append((parsed["ts"], parsed["rxtx"], parsed["freq_mhz"], parsed["mode"],
-                                      parsed["snr"], parsed["dt"], parsed["df"], parsed["msg"], other))
+                                      parsed["snr"], parsed["dt"], parsed["df"], parsed["msg"], other,
+                                      raw_line.rstrip("\r\n")))
                 # Flush periodically on lines *scanned* (not just matched) so
                 # the progress bar moves during a long initial index, where
                 # well under 1% of lines match one of our own callsigns.
@@ -231,8 +246,8 @@ class AllTxtCache:
         with self._lock:
             if batch:
                 self._db.executemany(
-                    "INSERT OR IGNORE INTO lines (ts, rxtx, freq_mhz, mode, snr, dt, df, msg, other_call) "
-                    "VALUES (?,?,?,?,?,?,?,?,?)", batch,
+                    "INSERT OR IGNORE INTO lines (ts, rxtx, freq_mhz, mode, snr, dt, df, msg, other_call, raw) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?)", batch,
                 )
                 self.status["lines_indexed"] = self.status.get("lines_indexed", 0) + len(batch)
             self._db.execute(
@@ -248,13 +263,13 @@ class AllTxtCache:
         with self._lock:
             if near_epoch:
                 rows = self._db.execute(
-                    "SELECT ts, rxtx, freq_mhz, mode, snr, dt, df, msg FROM lines "
+                    "SELECT ts, rxtx, freq_mhz, mode, snr, dt, df, msg, raw FROM lines "
                     "WHERE other_call = ? AND ts BETWEEN ? AND ? ORDER BY ts",
                     (base, near_epoch - MATCH_WINDOW_BEFORE_S, near_epoch + MATCH_WINDOW_AFTER_S),
                 ).fetchall()
             else:
                 rows = self._db.execute(
-                    "SELECT ts, rxtx, freq_mhz, mode, snr, dt, df, msg FROM lines "
+                    "SELECT ts, rxtx, freq_mhz, mode, snr, dt, df, msg, raw FROM lines "
                     "WHERE other_call = ? ORDER BY ts", (base,),
                 ).fetchall()
         return rows
@@ -286,6 +301,21 @@ class LotwActivity:
         except OSError:
             log.exception("Could not read LoTW user-activity file %s", self.path)
 
+    def reload(self):
+        self._by_call = {}
+        self._load()
+
+    @property
+    def count(self) -> int:
+        return len(self._by_call)
+
+    @property
+    def updated(self) -> Optional[float]:
+        try:
+            return os.path.getmtime(self.path)
+        except OSError:
+            return None
+
     def last_active(self, call: str) -> Optional[str]:
         base = base_callsign(call) or call
         return self._by_call.get(base) or self._by_call.get(call)
@@ -298,7 +328,24 @@ class LotwActivity:
             d = datetime.datetime.strptime(date_str, "%Y-%m-%d")
         except ValueError:
             return None
-        return (datetime.datetime.now() - d).days <= LOTW_RECENT_DAYS
+        return (datetime.datetime.utcnow() - d).days <= LOTW_RECENT_DAYS
+
+
+def update_lotw_activity(path: str, url: str = LOTW_ACTIVITY_URL, timeout: float = 30.0) -> tuple:
+    """Download ARRL's current lotw-user-activity.csv snapshot and atomically
+    replace `path`. Returns (ok, message)."""
+    tmp = path + ".tmp"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "MacLoggerDX-Awards/1.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp, open(tmp, "wb") as f:
+            shutil.copyfileobj(resp, f)
+        os.replace(tmp, path)
+    except (OSError, urllib.error.URLError) as exc:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        log.exception("Failed to download LoTW user-activity file from %s", url)
+        return False, str(exc)
+    return True, "ok"
 
 
 # ---------------------------------------------------------------------------
@@ -312,7 +359,7 @@ def analyze_exchange(rows: list, my_bases: set, lotw: LotwActivity, other_call: 
     saw_rrr_only = False
     rx_snrs = []
 
-    for ts, rxtx, freq_mhz, mode, snr, dt, df, msg in rows:
+    for ts, rxtx, freq_mhz, mode, snr, dt, df, msg, raw in rows:
         parsed = parse_message(msg)
         if rxtx == "Rx" and parsed.to_call and base_callsign(parsed.to_call) in my_bases:
             two_way_confirmed = True
@@ -323,8 +370,8 @@ def analyze_exchange(rows: list, my_bases: set, lotw: LotwActivity, other_call: 
         elif parsed.is_rrr:
             saw_rrr_only = True
         lines.append({
-            "ts": ts, "time": datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S"),
-            "rxtx": rxtx, "freq_mhz": freq_mhz, "mode": mode, "snr": snr, "msg": msg,
+            "ts": ts, "time": datetime.datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S"),
+            "rxtx": rxtx, "freq_mhz": freq_mhz, "mode": mode, "snr": snr, "msg": msg, "raw": raw,
         })
 
     avg_snr = round(sum(rx_snrs) / len(rx_snrs), 1) if rx_snrs else None
@@ -368,33 +415,67 @@ def analyze_exchange(rows: list, my_bases: set, lotw: LotwActivity, other_call: 
 def _connect_ro(database_path: str) -> sqlite3.Connection:
     return sqlite3.connect(f"file:{database_path}?mode=ro", uri=True, timeout=5.0)
 
-def find_at_risk_qsos(database_path: str, qso_table: str) -> list:
+# Local VK2-to-VK2 2M contacts are same-entity VHF ragchews -- they don't
+# advance any DXCC chase (you can't "need" your own country) and just add
+# noise to the at-risk list, so they're excluded here. See NOT_LOCAL_2M_VK2
+# footnote surfaced in the UI.
+NOT_LOCAL_2M_VK2 = "NOT (band_tx = '2M' AND call LIKE 'VK2%' AND my_call LIKE 'VK2%')"
+
+
+def _is_confirmed(qsl_received) -> bool:
+    if not qsl_received:
+        return False
+    return any(tag in qsl_received for tag in ("LoTW", "eQSL", "CardC", "Card"))
+
+
+def find_at_risk_qsos(database_path: str, qso_table: str, dxcc_resolver: Optional[DxccResolver] = None) -> list:
     """(DXCC entity, band) combinations with zero LoTW/eQSL/card confirmation
     -- e.g. Northern Ireland worked and confirmed on 20M but not on 12M/10M
     still flags the 12M/10M QSOs -- and every QSO on record for each such
-    combination."""
+    combination. Excludes Maritime Mobile and local VK2-to-VK2 2M contacts.
+
+    Grouping is keyed on the DXCC entity resolved fresh from each QSO's
+    callsign (via dxcc_resolver), not the dxcc_country/dxcc_id text stored in
+    MacLoggerDX's own log -- that log has been seen to store the same entity
+    under multiple spellings ("United States" vs "United States of America")
+    and occasionally a wrong id (e.g. a Hawaii QSO tagged with the mainland
+    US id), which would otherwise split or merge groups incorrectly. Falls
+    back to the stored fields only when the resolver can't place the call."""
     conn = _connect_ro(database_path)
     try:
         cur = conn.cursor()
         cur.execute(
-            f"SELECT dxcc_country, band_tx FROM {qso_table} "
-            f"WHERE dxcc_country IS NOT NULL AND band_tx IS NOT NULL AND call NOT LIKE '%/MM' "
-            f"GROUP BY dxcc_country, band_tx HAVING SUM(CASE WHEN {CONFIRMED_LIKE} THEN 1 ELSE 0 END) = 0"
-        )
-        pairs = cur.fetchall()
-        if not pairs:
-            return []
-        clauses = " OR ".join(["(dxcc_country = ? AND band_tx = ?)"] * len(pairs))
-        params = [v for pair in pairs for v in pair]
-        cur.execute(
             f"SELECT call, my_call, dxcc_country, dxcc_id, band_tx, band_rx, mode, qso_start, qso_done, qsl_received "
-            f"FROM {qso_table} WHERE {clauses} ORDER BY dxcc_country, band_tx, qso_start",
-            params,
+            f"FROM {qso_table} "
+            f"WHERE dxcc_country IS NOT NULL AND band_tx IS NOT NULL AND call NOT LIKE '%/MM' "
+            f"AND {NOT_LOCAL_2M_VK2}"
         )
         cols = ["call", "my_call", "dxcc_country", "dxcc_id", "band_tx", "band_rx", "mode", "qso_start", "qso_done", "qsl_received"]
-        return [dict(zip(cols, row)) for row in cur.fetchall()]
+        rows = [dict(zip(cols, row)) for row in cur.fetchall()]
     finally:
         conn.close()
+
+    for row in rows:
+        entity = dxcc_resolver.lookup(row["call"]) if dxcc_resolver else None
+        if entity is not None:
+            row["entity_id"] = entity.dxcc_id
+            row["entity_name"] = entity.name
+        else:
+            row["entity_id"] = row["dxcc_id"]
+            row["entity_name"] = row["dxcc_country"]
+
+    groups: dict = {}
+    for row in rows:
+        groups.setdefault((row["entity_id"], row["band_tx"]), []).append(row)
+
+    at_risk = []
+    for group_rows in groups.values():
+        if any(_is_confirmed(r["qsl_received"]) for r in group_rows):
+            continue
+        at_risk.extend(group_rows)
+
+    at_risk.sort(key=lambda r: (r["entity_name"] or "", r["band_tx"] or "", r["qso_start"] or 0))
+    return at_risk
 
 
 # ---------------------------------------------------------------------------
@@ -434,14 +515,31 @@ class QslMethods:
             entries = self._load_locked()
             for e in entries:
                 if e.get("call") == call:
+                    # Preserve status (pending/done) across edits -- editing
+                    # the method/cost/notes on a call you've already marked
+                    # done shouldn't silently reopen it.
                     e["method"], e["cost"], e["notes"] = method, cost, notes
-                    e["updated"] = datetime.datetime.now().isoformat(timespec="seconds")
+                    e.setdefault("status", "pending")
+                    e["updated"] = datetime.datetime.utcnow().isoformat(timespec="seconds")
                     break
             else:
                 entries.append({
                     "call": call, "method": method, "cost": cost, "notes": notes,
-                    "updated": datetime.datetime.now().isoformat(timespec="seconds"),
+                    "status": "pending",
+                    "updated": datetime.datetime.utcnow().isoformat(timespec="seconds"),
                 })
+            self._save(entries)
+            return entries
+
+    def set_status(self, call: str, status: str) -> list:
+        call = call.strip().upper()
+        with self._lock:
+            entries = self._load_locked()
+            for e in entries:
+                if e.get("call") == call:
+                    e["status"] = status
+                    e["updated"] = datetime.datetime.utcnow().isoformat(timespec="seconds")
+                    break
             self._save(entries)
             return entries
 
@@ -449,6 +547,63 @@ class QslMethods:
         call = call.strip().upper()
         with self._lock:
             entries = [e for e in self._load_locked() if e.get("call") != call]
+            self._save(entries)
+            return entries
+
+
+def not_in_log_key(call: str, band: str, mode: str, qso_start) -> str:
+    """A QSO's (call, band, mode, qso_start) is unique enough to identify one
+    specific logged contact -- used both to mark a QSO 'not in their log' and
+    to filter it back out of the at-risk list on future loads."""
+    return f"{(call or '').strip().upper()}|{band or ''}|{mode or ''}|{qso_start or ''}"
+
+
+class NotInLogList:
+    """QSOs the operator has flagged as 'not in the other side's log' --
+    hidden from the at-risk table and shown instead as a one-line list at the
+    bottom of the page, with an undo. Persisted so the flag survives reloads
+    (the at-risk list itself is recomputed from the live log every time)."""
+
+    def __init__(self, path: str):
+        self.path = path
+        self._lock = threading.RLock()
+
+    def _load_locked(self) -> list:
+        if not os.path.exists(self.path):
+            return []
+        try:
+            with open(self.path, "r") as f:
+                return json.load(f)
+        except (OSError, json.JSONDecodeError):
+            log.exception("Could not read %s", self.path)
+            return []
+
+    def load(self) -> list:
+        with self._lock:
+            return self._load_locked()
+
+    def _save(self, entries: list):
+        tmp = self.path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(entries, f, indent=2)
+        os.replace(tmp, self.path)
+
+    def keys(self) -> set:
+        return {e["key"] for e in self.load()}
+
+    def mark(self, entry: dict) -> list:
+        with self._lock:
+            entries = self._load_locked()
+            if not any(e["key"] == entry["key"] for e in entries):
+                entry = dict(entry)
+                entry["marked"] = datetime.datetime.utcnow().isoformat(timespec="seconds")
+                entries.append(entry)
+                self._save(entries)
+            return entries
+
+    def unmark(self, key: str) -> list:
+        with self._lock:
+            entries = [e for e in self._load_locked() if e.get("key") != key]
             self._save(entries)
             return entries
 
@@ -462,18 +617,30 @@ qsl_bp = Blueprint("qsl", __name__, template_folder="templates")
 _cache: Optional[AllTxtCache] = None
 _lotw: Optional[LotwActivity] = None
 _methods: Optional[QslMethods] = None
+_not_in_log: Optional[NotInLogList] = None
+_dxcc_resolver: Optional[DxccResolver] = None
 _config: Optional[QslHelperConfig] = None
+
+
+def get_cache() -> Optional[AllTxtCache]:
+    """Accessor for other blueprints (e.g. the callsign-history lookup in
+    live_monitor.py) that want to reuse the shared ALL.TXT cache rather than
+    indexing it a second time."""
+    return _cache
 
 
 def init_qsl_helper(app, config: QslHelperConfig):
     """Create the ALL.TXT cache (and start its background indexer), load the
-    LoTW activity table, and register the /qsl routes. Call once at startup."""
-    global _cache, _lotw, _methods, _config
+    LoTW activity table and DXCC resolver, and register the /qsl routes. Call
+    once at startup."""
+    global _cache, _lotw, _methods, _not_in_log, _dxcc_resolver, _config
     _config = config
     _cache = AllTxtCache(config)
     _cache.start()
     _lotw = LotwActivity(config.lotw_activity_file)
     _methods = QslMethods(config.qsl_methods_file)
+    _not_in_log = NotInLogList(config.not_in_log_file)
+    _dxcc_resolver = DxccResolver(config.dxcc_file)
     app.register_blueprint(qsl_bp)
     return _cache
 
@@ -490,33 +657,40 @@ def qsl_data():
 
     my_bases = {base_callsign(c) or c for c in _config.my_calls}
     methods_by_call = {e["call"]: e for e in _methods.load()}
+    hidden_keys = _not_in_log.keys()
 
     entities = {}
-    for qso in find_at_risk_qsos(_config.database_path, _config.qso_table):
+    for qso in find_at_risk_qsos(_config.database_path, _config.qso_table, _dxcc_resolver):
+        key = not_in_log_key(qso["call"], qso["band_tx"], qso["mode"], qso["qso_start"])
+        if key in hidden_keys:
+            continue
         rows = _cache.find_exchange(qso["call"], qso.get("qso_start"))
         analysis = analyze_exchange(rows, my_bases, _lotw, qso["call"])
         entry = {
+            "key": key,
             "call": qso["call"],
             "my_call": qso["my_call"],
-            "dxcc_country": qso["dxcc_country"],
+            "dxcc_country": qso["entity_name"],
             "band": qso["band_tx"] or qso["band_rx"],
             "mode": qso["mode"],
             "qso_start": qso["qso_start"],
             "qso_start_str": (
-                datetime.datetime.fromtimestamp(qso["qso_start"]).strftime("%Y-%m-%d %H:%M")
+                datetime.datetime.utcfromtimestamp(qso["qso_start"]).strftime("%Y-%m-%d %H:%M")
                 if qso["qso_start"] else None
             ),
             "qsl_received": qso["qsl_received"],
             "qsl_method": methods_by_call.get(qso["call"]),
             **analysis,
         }
-        group_key = f"{qso['dxcc_country']} — {qso['band_tx']}"
+        group_key = f"{qso['entity_name']} — {qso['band_tx']}"
         entities.setdefault(group_key, []).append(entry)
 
     return jsonify({
         "entities": entities,
         "cache_status": _cache.status,
         "methods": _methods.load(),
+        "not_in_log": _not_in_log.load(),
+        "lotw_status": {"count": _lotw.count, "updated": _lotw.updated},
     })
 
 
@@ -558,3 +732,63 @@ def qsl_methods_delete():
         return jsonify({"error": "call is required"}), 400
     entries = _methods.delete(call)
     return jsonify({"methods": entries})
+
+
+@qsl_bp.route("/qsl/methods/status", methods=["POST"])
+def qsl_methods_status():
+    if _methods is None:
+        return jsonify({"error": "QSL Helper not initialised"}), 503
+    body = request.get_json(silent=True) or {}
+    call = (body.get("call") or "").strip()
+    status = (body.get("status") or "").strip()
+    if not call or status not in ("pending", "done"):
+        return jsonify({"error": "call and a valid status (pending/done) are required"}), 400
+    entries = _methods.set_status(call, status)
+    return jsonify({"methods": entries})
+
+
+@qsl_bp.route("/qsl/lotw/update", methods=["POST"])
+def qsl_lotw_update():
+    if _lotw is None or _config is None:
+        return jsonify({"error": "QSL Helper not initialised"}), 503
+    ok, message = update_lotw_activity(_config.lotw_activity_file)
+    if ok:
+        _lotw.reload()
+    return jsonify({"ok": ok, "message": message, "lotw_status": {"count": _lotw.count, "updated": _lotw.updated}})
+
+
+@qsl_bp.route("/qsl/not_in_log", methods=["POST"])
+def qsl_not_in_log_mark():
+    if _not_in_log is None:
+        return jsonify({"error": "QSL Helper not initialised"}), 503
+    body = request.get_json(silent=True) or {}
+    call = (body.get("call") or "").strip().upper()
+    band = (body.get("band") or "").strip()
+    mode = (body.get("mode") or "").strip()
+    qso_start = body.get("qso_start")
+    if not call:
+        return jsonify({"error": "call is required"}), 400
+    key = not_in_log_key(call, band, mode, qso_start)
+    entry = {
+        "key": key,
+        "call": call,
+        "band": band,
+        "mode": mode,
+        "qso_start": qso_start,
+        "dxcc_country": body.get("dxcc_country") or "",
+        "qso_start_str": body.get("qso_start_str") or "",
+    }
+    entries = _not_in_log.mark(entry)
+    return jsonify({"not_in_log": entries})
+
+
+@qsl_bp.route("/qsl/not_in_log/undo", methods=["POST"])
+def qsl_not_in_log_undo():
+    if _not_in_log is None:
+        return jsonify({"error": "QSL Helper not initialised"}), 503
+    body = request.get_json(silent=True) or {}
+    key = body.get("key") or ""
+    if not key:
+        return jsonify({"error": "key is required"}), 400
+    entries = _not_in_log.unmark(key)
+    return jsonify({"not_in_log": entries})

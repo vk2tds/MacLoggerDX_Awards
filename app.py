@@ -27,10 +27,12 @@ import awards_tree
 import dxcc_challenge
 import live_monitor
 import qsl_helper
+import radio_control
+import wsjtx_remote
 
 log = logging.getLogger("app." + __name__)
 
-APP_VERSION = "2026.07.12"
+APP_VERSION = "2026.07.14"
 
 app = Flask(__name__)
 app.secret_key = 'macloggerdx-awards'
@@ -53,7 +55,7 @@ def refresh():
     except Exception as exc:
         log.exception('Failed to refresh awards from the database')
         state['error'] = str(exc)
-    state['last_refreshed'] = datetime.datetime.now()
+    state['last_refreshed'] = datetime.datetime.utcnow()
 
 
 refresh()
@@ -71,8 +73,16 @@ live_monitor.init_live_monitor(app, sock, live_monitor.LiveMonitorConfig(
 qsl_helper.init_qsl_helper(app, qsl_helper.QslHelperConfig(
     database_path=analysis.database_name,
     qso_table=analysis.qso_table,
+    dxcc_file=analysis.dxcc_file,
     my_calls=("VK2TDS", "AX2TDS"),
     alltxt_path="/Users/darryl/Library/Application Support/WSJT-X/ALL.TXT",
+))
+
+wsjtx_remote.init_wsjtx_remote(app)
+
+radio_control.init_radio_control(app, radio_control.RigctldConfig(
+    host="127.0.0.1",
+    port=4532,
 ))
 
 

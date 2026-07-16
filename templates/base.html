@@ -12,11 +12,14 @@
   <a href="{{ url_for('dxcc_view') }}">DXCC Status</a>
   <a href="{{ url_for('live.live_view') }}">Live Monitor</a>
   <a href="{{ url_for('qsl.qsl_view') }}">QSL Helper</a>
+  <a href="{{ url_for('remote.remote_view') }}">Remote</a>
+  <a href="{{ url_for('remote.remote_waterfall_view') }}">Waterfall</a>
+  <a href="{{ url_for('radio.radio_view') }}">Radio</a>
   <form class="refresh-form" method="post" action="{{ url_for('refresh_view') }}">
     <button type="submit">Refresh</button>
   </form>
   {% if last_refreshed %}
-    <span class="refreshed">Last refreshed {{ last_refreshed.strftime('%Y-%m-%d %H:%M:%S') }}</span>
+    <span class="refreshed">Last refreshed {{ last_refreshed.strftime('%Y-%m-%d %H:%M:%S') }} UTC</span>
   {% endif %}
   <span class="version">v{{ app_version }}</span>
 </nav>
