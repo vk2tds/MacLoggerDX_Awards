@@ -3,3 +3,4 @@ flask-sock
 numpy
 tabulate
 python-dateutil
+pyobjc-framework-Quartz; sys_platform == "darwin"

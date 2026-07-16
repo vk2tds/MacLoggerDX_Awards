@@ -126,10 +126,40 @@ def remote_gui_status():
 def remote_gui_checkbox():
     body = request.get_json(silent=True) or {}
     name = body.get("name")
+    on = bool(body.get("on"))
     if name not in wsjtx_gui_bridge.CHECKBOXES:
         return jsonify({"ok": False, "error": f"Unknown checkbox {name!r}"}), 400
+
+    if name in wsjtx_gui_bridge.TX_ARM_CHECKBOXES:
+        # Enable Tx / Tune: arming has no UDP equivalent at all, so ON goes
+        # through a real HID-level click (wsjtx_gui_bridge.arm_tx_checkbox).
+        # OFF deliberately does NOT use a GUI click -- it goes through the
+        # already-reliable UDP HaltTx command instead, which makes WSJT-X's
+        # own code call autoButton->click()/stopTxButton->click() internally
+        # (see wsjtx_gui_bridge.py's module docstring for why that matters).
+        monitor = live_monitor.get_monitor()
+        if on:
+            try:
+                value = wsjtx_gui_bridge.arm_tx_checkbox(name)
+            except wsjtx_gui_bridge.WsjtxGuiError as exc:
+                return jsonify({"ok": False, "error": str(exc)}), 503
+            if not value:
+                return jsonify({"ok": False, "error": f"Could not arm {name} -- gave up after retries", "value": False}), 502
+            return jsonify({"ok": True, "value": True})
+        else:
+            if monitor is None:
+                return jsonify({"ok": False, "error": "Live monitor not initialised"}), 503
+            monitor.send_halt_tx(auto_tx_only=(name == "Enable Tx"))
+            wsjtx_gui_bridge.set_cached_checkbox_state(name, False)
+            if name == "Tune":
+                # on_stopTxButton_clicked() (the auto_tx_only=False path)
+                # also unchecks Enable Tx as a side effect -- see
+                # wsjtx_gui_bridge.py's module docstring.
+                wsjtx_gui_bridge.set_cached_checkbox_state("Enable Tx", False)
+            return jsonify({"ok": True, "value": False})
+
     try:
-        value = wsjtx_gui_bridge.set_checkbox(name, bool(body.get("on")))
+        value = wsjtx_gui_bridge.set_checkbox(name, on)
     except wsjtx_gui_bridge.WsjtxGuiError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 503
     return jsonify({"ok": True, "value": value})

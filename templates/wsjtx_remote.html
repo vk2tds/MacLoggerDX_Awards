@@ -3,13 +3,13 @@
 {% block content %}
 <h1>WSJT-X Remote</h1>
 <p style="color:#666; font-size:0.85rem; max-width:60em; margin-top:-0.5rem;">
-  Remote control surface for WSJT-X. Most controls go over its UDP API; a few (Stop, Monitor, Decode, and the
-  band/mode buttons) have no UDP equivalent at all and instead drive WSJT-X's own window directly via
-  AppleScript/Accessibility scripting -- see the hint text below the button row if that stops working (it
-  needs WSJT-X running and this app to have Accessibility permission). Enable Tx and Tune are deliberately
-  left disabled: AppleScript can toggle their on-screen state but doesn't actually key the transmitter,
-  confirmed against rigctld's live PTT reading -- misleading, so not wired up. Rig frequency/band control is
-  separate: see the <a href="{{ url_for('radio.radio_view') }}">Radio</a> tab (rigctld).
+  Remote control surface for WSJT-X. Most controls go over its UDP API; a few (Stop, Monitor, Decode, Enable
+  Tx, Tune, and the band/mode buttons) have no UDP equivalent at all and instead drive WSJT-X's own window
+  directly -- see the hint text below the button row if that stops working (it needs WSJT-X running,
+  Accessibility permission, and pyobjc-framework-Quartz installed). Enable Tx and Tune genuinely arm/key the
+  transmitter when checked -- turning either off goes through the ordinary Halt Tx UDP command, not another
+  GUI click. Rig frequency/band control is separate: see the
+  <a href="{{ url_for('radio.radio_view') }}">Radio</a> tab (rigctld).
 </p>
 <p style="font-size:0.85rem; margin: 0 0 0.5rem;">
   <label>My call <input id="my-call" type="text" value="{{ my_call }}" size="10"></label>
@@ -160,9 +160,9 @@
     <label class="gui-toggle" title="Toggle monitoring on/off -- via GUI scripting, not UDP"><input type="checkbox" id="gui-monitor"> Monitor</label>
     <button class="live" id="erase-btn" title="Sends WSJT-X's Clear message">Erase</button>
     <label class="gui-toggle" title="Decode most recent Rx period -- via GUI scripting, not UDP"><input type="checkbox" id="gui-decode"> Decode</label>
-    <button disabled title="Verified 2026-07-16: AppleScript can toggle this checkbox's visible state but does not actually arm Tx -- misleading, disabled until a real fix is found">Enable Tx</button>
+    <label class="gui-toggle gui-toggle-warn" title="Toggle Auto-Tx on/off -- this genuinely arms/starts real automatic transmissions"><input type="checkbox" id="gui-enable-tx"> Enable Tx</label>
     <button class="live" id="halt-btn" title="Sends HaltTx">Halt Tx</button>
-    <button disabled title="Verified 2026-07-16: AppleScript can toggle this checkbox's visible state (even turns red) but does not actually key the transmitter -- misleading, disabled until a real fix is found">Tune</button>
+    <label class="gui-toggle gui-toggle-warn" title="Toggle a pure Tx tone on/off -- this genuinely transmits a real carrier"><input type="checkbox" id="gui-tune"> Tune</label>
     <label><input type="checkbox" id="wf-show" checked> Waterfall</label>
   </div>
   <p class="proc-hint" id="gui-bridge-hint"></p>
@@ -309,6 +309,8 @@
   const guiStopBtn = document.getElementById('gui-stop-btn');
   const guiMonitor = document.getElementById('gui-monitor');
   const guiDecode = document.getElementById('gui-decode');
+  const guiEnableTx = document.getElementById('gui-enable-tx');
+  const guiTune = document.getElementById('gui-tune');
   const guiBridgeHint = document.getElementById('gui-bridge-hint');
   const MAX_ROWS = 200;
   let currentWs = null;
@@ -546,16 +548,17 @@
   }
 
   // -- GUI-scripting bridge (wsjtx_gui_bridge.py): drives WSJT-X's own
-  // window directly via AppleScript/Accessibility for the few controls with
-  // no UDP equivalent -- Stop, Monitor, Decode, and the band/mode buttons.
-  // Enable Tx and Tune are deliberately NOT wired here -- see
-  // wsjtx_gui_bridge.py's module docstring (2026-07-16: toggles the
-  // checkbox's visible state but doesn't actually key the transmitter).
-  // Requires WSJT-X running and this app to have Accessibility permission
-  // (System Settings -> Privacy & Security -> Accessibility); errors from
-  // that surface in guiBridgeHint rather than failing silently, since
-  // "permission not granted yet" is an expected
-  // first-run state, not a bug.
+  // window directly for the few controls with no UDP equivalent -- Stop,
+  // Monitor, Decode, Enable Tx, Tune, and the band/mode buttons. Enable Tx/
+  // Tune arm via a genuine HID-level click (see wsjtx_gui_bridge.py's
+  // module docstring, 2026-07-16) and can take a few seconds with retries;
+  // turning them off goes through the ordinary Halt Tx UDP path instead of
+  // another GUI click, since that's already proven reliable. Requires
+  // WSJT-X running, this app to have Accessibility permission (System
+  // Settings -> Privacy & Security -> Accessibility), and
+  // pyobjc-framework-Quartz installed; errors from that surface in
+  // guiBridgeHint rather than failing silently, since "permission not
+  // granted yet" is an expected first-run state, not a bug.
   const WSJTX_MODE_BUTTON = { FT8: 'FT8', FT4: 'FT4', MSK144: 'MSK', Q65: 'Q65', JT65: 'JT65' };
 
   function guiButtonClick(name) {
@@ -566,14 +569,25 @@
   }
 
   function guiSetCheckbox(el, name) {
-    postJson('/remote/gui/checkbox', { name, on: el.checked }).then(d => {
+    const wasChecked = el.checked;
+    el.disabled = true;
+    if (wasChecked) { guiBridgeHint.textContent = `Arming ${name}… (can take a few seconds)`; guiBridgeHint.className = 'proc-hint'; }
+    postJson('/remote/gui/checkbox', { name, on: wasChecked }).then(d => {
+      el.disabled = false;
       if (!d.ok) {
         guiBridgeHint.textContent = d.error;
         guiBridgeHint.className = 'proc-hint err';
-        el.checked = !el.checked; // revert -- the click didn't actually take
+        el.checked = !wasChecked; // revert -- the click didn't actually take
       } else {
+        guiBridgeHint.textContent = '';
+        guiBridgeHint.className = 'proc-hint';
         el.checked = d.value;
       }
+    }).catch(e => {
+      el.disabled = false;
+      el.checked = !wasChecked;
+      guiBridgeHint.textContent = String(e);
+      guiBridgeHint.className = 'proc-hint err';
     });
   }
 
@@ -589,12 +603,16 @@
       const cb = d.checkboxes;
       if (document.activeElement !== guiMonitor) guiMonitor.checked = cb['Monitor'];
       if (document.activeElement !== guiDecode) guiDecode.checked = cb['Decode'];
+      if (document.activeElement !== guiEnableTx && !guiEnableTx.disabled) guiEnableTx.checked = cb['Enable Tx'];
+      if (document.activeElement !== guiTune && !guiTune.disabled) guiTune.checked = cb['Tune'];
     }).catch(() => {});
   }
 
   guiStopBtn.addEventListener('click', () => guiButtonClick('Stop'));
   guiMonitor.addEventListener('change', () => guiSetCheckbox(guiMonitor, 'Monitor'));
   guiDecode.addEventListener('change', () => guiSetCheckbox(guiDecode, 'Decode'));
+  guiEnableTx.addEventListener('change', () => guiSetCheckbox(guiEnableTx, 'Enable Tx'));
+  guiTune.addEventListener('change', () => guiSetCheckbox(guiTune, 'Tune'));
 
   bandRow.querySelectorAll('.band-btn').forEach(btn => {
     btn.addEventListener('click', () => guiButtonClick(btn.textContent.trim()));
