@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}Help{% endblock %}
+{% block content %}
+<h1>Help &amp; Troubleshooting</h1>
+<p style="color:#666; font-size:0.85rem; max-width:60em; margin-top:-0.5rem;">
+  Common setup issues and what the error messages on each tab actually mean. Expand a section below.
+</p>
+
+<style>
+  .help-shell { background: #ececec; border: 1px solid #b8b8b8; border-radius: 8px; padding: 0 0.9rem; font-family: -apple-system, "Segoe UI", sans-serif; color: #111; max-width: 54em; margin-bottom: 0.75rem; }
+  .help-shell summary { cursor: pointer; font-weight: 600; padding: 0.7rem 0; font-size: 0.95rem; }
+  .help-shell[open] summary { border-bottom: 1px solid #d0d0d0; margin-bottom: 0.6rem; }
+  .help-body { padding-bottom: 0.8rem; font-size: 0.85rem; line-height: 1.5; }
+  .help-body p { margin: 0.5rem 0; }
+  .help-body ol, .help-body ul { margin: 0.4rem 0; padding-left: 1.4rem; }
+  .help-body li { margin: 0.25rem 0; }
+  .help-body code { background: #ddd; border-radius: 3px; padding: 0.05rem 0.3rem; font-size: 0.85em; }
+  .help-body pre { background: #111; color: #eee; padding: 0.6rem; border-radius: 4px; overflow-x: auto; font-size: 0.8rem; }
+  .help-symptom { color: #b45309; font-weight: 600; }
+  .help-body .path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; background: #ddd; border-radius: 3px; padding: 0.05rem 0.3rem; word-break: break-all; }
+</style>
+
+<details class="help-shell" open>
+  <summary>WSJT-X GUI bridge errors (Remote tab: Enable Tx / Tune / Monitor / Decode / Stop / band+mode buttons)</summary>
+  <div class="help-body">
+    <p class="help-symptom">Symptom: red text under the button row, e.g. "osascript is not allowed assistive access. (-1719)", or "Can't get checkbox... (-1728)" during startup.</p>
+    <p>These controls have no WSJT-X UDP equivalent, so this app drives WSJT-X's own window directly via
+      macOS Accessibility scripting -- <code>System Events</code> needs permission to read/click WSJT-X's
+      UI, which macOS grants per-process and can lose track of after this app's Python process restarts
+      (it isn't a signed app bundle, so a fresh process instance sometimes isn't recognized as already
+      trusted).</p>
+    <p>Fix -- System Settings &rarr; Privacy &amp; Security &rarr; Accessibility, add <strong>both</strong>
+      of these (use the <code>+</code> button, then <code>Cmd+Shift+G</code> in the file picker to paste
+      the path) and make sure both are toggled on:</p>
+    <ul>
+      <li><span class="path">/opt/local/Library/Frameworks/Python.framework/Versions/3.12/Resources/Python.app</span></li>
+      <li><span class="path">/usr/bin/osascript</span></li>
+    </ul>
+    <p>No app restart needed -- the permission takes effect on the already-running process as soon as you
+      toggle it on. If it was working and suddenly stops after you (or Claude) edit a <code>.py</code> file
+      -- the dev server auto-restarts on save, and that's exactly the kind of restart that can drop this
+      permission -- re-check these two entries first before assuming something else broke.</p>
+    <p>Also needs <code>pyobjc-framework-Quartz</code> installed (in <code>requirements.txt</code>) for
+      Enable Tx/Tune specifically -- those arm via a real synthetic click, not just an accessibility
+      property read.</p>
+  </div>
+</details>
+
+<details class="help-shell">
+  <summary>Radio tab: rigctld not connected</summary>
+  <div class="help-body">
+    <p class="help-symptom">Symptom: red dot / "Not connected" at the top of the Radio tab, or the rigctld
+      process panel shows "rigctld binary not found".</p>
+    <ol>
+      <li>Install <a href="https://hamlib.github.io/" target="_blank" rel="noopener">Hamlib</a> if it isn't
+        already: <code>port install hamlib</code> or <code>brew install hamlib</code>.</li>
+      <li>In the "rigctld process" panel, set a rig model and serial device (the device dropdown lists
+        <code>/dev/cu.*</code> ports actually present).</li>
+      <li>Click Start. If it fails, expand "rigctld log" underneath for the actual CAT-level error --
+        usually a wrong serial device, wrong baud rate, or the radio's USB/CAT port not enabled.</li>
+    </ol>
+    <p>If rigctld is already running from somewhere else (not started by this app), the panel shows
+      "Running (started outside this app)" and Stop/Restart are unavailable -- that's expected, not an
+      error.</p>
+  </div>
+</details>
+
+<details class="help-shell">
+  <summary>RigDial tab: dial not detected / hardware control disabled</summary>
+  <div class="help-body">
+    <p class="help-symptom">Symptom: red dot, "Not connected -- plug in the dial", or "hid package/native
+      library not available".</p>
+    <p>This needs two separate things, both listed in <code>requirements.txt</code>:</p>
+    <ul>
+      <li>The <code>hid</code> Python package (<code>pip install hid</code>).</li>
+      <li>A native hidapi library -- pip does <strong>not</strong> provide this, it has to be installed
+        separately: <code>port install hidapi</code> or <code>brew install hidapi</code>.</li>
+    </ul>
+    <p>If the status specifically says the package/library is unavailable, that's a software install
+      problem (fix via the commands above) -- if it just says "not connected", the software side is fine
+      and it's genuinely not seeing the ShuttleXpress (check it's plugged in, try a different USB port).</p>
+    <p>The frequency preset list works from the browser regardless -- "Set Now" doesn't need the dial
+      plugged in at all, only the button/jog/shuttle mapping does.</p>
+  </div>
+</details>
+
+<details class="help-shell">
+  <summary>Live Monitor / Remote / Waterfall / QSL Helper: no decodes, "not connected"</summary>
+  <div class="help-body">
+    <p class="help-symptom">Symptom: decode tables stay empty, connection status never goes green.</p>
+    <p>These all depend on WSJT-X broadcasting its UDP status/decode messages. In WSJT-X:
+      <strong>Settings &rarr; Reporting</strong>, enable "Accept UDP requests" and check the UDP Server
+      host/port matches what this app listens on (<code>127.0.0.1:2237</code> by default, configured in
+      <code>app.py</code>) -- and if you're using multicast, that the multicast group
+      (<code>224.0.0.1</code> by default) matches too.</p>
+    <p>WSJT-X must actually be running and actively decoding (or at least connected) for any of this to
+      show data -- a closed WSJT-X, or one that hasn't decoded anything yet this session, will show as
+      quiet/empty rather than erroring.</p>
+  </div>
+</details>
+
+<details class="help-shell">
+  <summary>Remote tab: queued QSOs won't send to MacLoggerDX</summary>
+  <div class="help-body">
+    <p class="help-symptom">Symptom: entries in the QSO queue stay stuck in "pending" or show an error
+      after clicking Send.</p>
+    <p>QSOs are pushed into MacLoggerDX via its own <code>importADIF</code> AppleScript command, which
+      needs <strong>Automation</strong> permission -- a different permission category from Accessibility
+      (above), specific to one app controlling another. Check System Settings &rarr; Privacy &amp;
+      Security &rarr; Automation, find Python, and make sure MacLoggerDX is allowed underneath it. MacLoggerDX
+      also needs to actually be running.</p>
+  </div>
+</details>
+
+<details class="help-shell">
+  <summary>Why does the app keep reconnecting / briefly go offline while being worked on?</summary>
+  <div class="help-body">
+    <p>The app runs in debug/auto-reload mode -- saving a change to any <code>.py</code> file restarts the
+      whole Flask process automatically (you'll see every tab's status briefly drop to "connecting..."
+      before reconnecting on its own within a second or two). This is expected during development, not a
+      fault. As noted above, this kind of restart is also the most common trigger for the Accessibility
+      permission dropping out, so check that first if the WSJT-X GUI bridge stops working right after an
+      edit.</p>
+  </div>
+</details>
+{% endblock %}

@@ -1,0 +1,298 @@
+{% extends "base.html" %}
+{% block title %}RigDial{% endblock %}
+{% block content %}
+<h1>RigDial</h1>
+<p style="color:#666; font-size:0.85rem; max-width:60em; margin-top:-0.5rem;">
+  Hardware remote control via a Contour ShuttleXpress (5 buttons + jog wheel + shuttle ring), driving
+  the same rigctld connection as the <a href="{{ url_for('radio.radio_view') }}">Radio</a> tab -- no
+  Flrig involved. The frequency presets below work from the browser alone, with or without the dial
+  plugged in. Needs the <code>hid</code> Python package plus a native hidapi library installed
+  (e.g. <code>port install hidapi</code> or <code>brew install hidapi</code>) -- see the connection
+  status below if the dial isn't showing up.
+</p>
+
+<style>
+  .rd-shell { background: #ececec; border: 1px solid #b8b8b8; border-radius: 8px; padding: 0.75rem; font-family: -apple-system, "Segoe UI", sans-serif; color: #111; max-width: 50em; margin-bottom: 1rem; }
+  .rd-conn { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; margin-bottom: 0.4rem; }
+  .rd-conn .dot { width: 0.8rem; height: 0.8rem; border-radius: 50%; background: #999; flex-shrink: 0; }
+  .rd-conn .dot.up { background: #2e9c4a; }
+  .rd-conn .dot.down { background: #c62828; }
+  .rd-event { font-size: 0.78rem; color: #555; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  .rd-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-bottom: 0.6rem; }
+  .rd-table th { text-align: left; font-size: 0.75rem; color: #666; padding: 0.2rem 0.4rem; }
+  .rd-table td { padding: 0.2rem 0.4rem; border-top: 1px solid #d8d8d8; }
+  .rd-table input[type=text] { width: 10em; font-size: 0.85rem; padding: 0.2rem 0.3rem; }
+  .rd-table input[type=text].freq { width: 8em; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .rd-table button { cursor: pointer; border: 1px solid #999; background: #f4f4f4; border-radius: 3px; padding: 0.2rem 0.5rem; font-size: 0.78rem; }
+  .rd-table button:hover { background: #e6e6e6; }
+  .rd-table button.danger { border-color: #c62828; color: #c62828; }
+  .rd-table .band { color: #777; font-size: 0.78rem; }
+
+  .rd-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+  .rd-row label { display: flex; align-items: center; gap: 0.3rem; font-size: 0.85rem; }
+  .rd-row select { font-size: 0.85rem; padding: 0.2rem 0.3rem; }
+  .rd-row input[type=number] { width: 6em; font-size: 0.85rem; padding: 0.2rem 0.3rem; }
+  .rd-row button { cursor: pointer; border: 1px solid #999; background: #f4f4f4; border-radius: 3px; padding: 0.3rem 0.7rem; font-size: 0.85rem; }
+  .rd-row button:hover { background: #e6e6e6; }
+
+  .action-result { font-size: 0.78rem; margin-left: 0.5rem; }
+  .action-result.ok { color: #2e7d32; }
+  .action-result.err { color: #c62828; }
+</style>
+
+<div class="rd-shell">
+  <div class="rd-conn">
+    <span class="dot" id="rd-dot"></span>
+    <span id="rd-conn-text">checking…</span>
+  </div>
+  <div class="rd-event" id="rd-event">--</div>
+</div>
+
+<div class="rd-shell">
+  <h3 style="margin: 0 0 0.5rem;">Frequency presets</h3>
+  <table class="rd-table">
+    <thead><tr><th>Name</th><th>Frequency (MHz)</th><th>Band</th><th colspan="2"></th></tr></thead>
+    <tbody id="rd-preset-rows"></tbody>
+    <tfoot>
+      <tr>
+        <td><input type="text" id="rd-new-name" placeholder="Name"></td>
+        <td><input type="text" class="freq" id="rd-new-freq" placeholder="14.074000"></td>
+        <td></td>
+        <td colspan="2"><button id="rd-add-btn">Add preset</button></td>
+      </tr>
+    </tfoot>
+  </table>
+  <span class="action-result" id="rd-preset-result"></span>
+</div>
+
+<div class="rd-shell">
+  <h3 style="margin: 0 0 0.5rem;">Button / jog / shuttle mapping</h3>
+  <div id="rd-button-rows"></div>
+  <div class="rd-row">
+    <label>Shuttle ring
+      <select id="rd-shuttle-action">
+        {% for action in shuttle_actions %}<option value="{{ action }}">{{ action }}</option>{% endfor %}
+      </select>
+    </label>
+  </div>
+  <div class="rd-row">
+    <label>Jog step, small (Hz) <input type="number" id="rd-step-small" min="1" step="1"></label>
+    <label>Jog step, big (Hz) <input type="number" id="rd-step-big" min="1" step="1"></label>
+  </div>
+  <div class="rd-row">
+    <button id="rd-save-config-btn">Save mapping</button>
+    <span class="action-result" id="rd-config-result"></span>
+  </div>
+  <p style="font-size:0.75rem; color:#888; max-width:44em;">
+    <code>mod_*</code> actions only take effect while that button is held down: the jog wheel adjusts
+    that parameter instead of VFO frequency for as long as it's held. <code>band_up</code>/
+    <code>band_down</code>/shuttle's <code>cycle_presets</code> step through the preset list above in
+    order. <code>ptt</code> keys the transmitter directly while held -- same caution as the Radio
+    tab's Key Tx button.
+  </p>
+</div>
+
+<script>
+(function () {
+  const rdDot = document.getElementById('rd-dot');
+  const rdConnText = document.getElementById('rd-conn-text');
+  const rdEvent = document.getElementById('rd-event');
+  const presetRows = document.getElementById('rd-preset-rows');
+  const newName = document.getElementById('rd-new-name');
+  const newFreq = document.getElementById('rd-new-freq');
+  const addBtn = document.getElementById('rd-add-btn');
+  const presetResult = document.getElementById('rd-preset-result');
+  const buttonRows = document.getElementById('rd-button-rows');
+  const shuttleSelect = document.getElementById('rd-shuttle-action');
+  const stepSmall = document.getElementById('rd-step-small');
+  const stepBig = document.getElementById('rd-step-big');
+  const saveConfigBtn = document.getElementById('rd-save-config-btn');
+  const configResult = document.getElementById('rd-config-result');
+
+  const BUTTON_ACTIONS = {{ button_actions | tojson }};
+  const BUTTON_COUNT = {{ button_count }};
+
+  let configFocused = false;
+  let presetsFocused = false;
+
+  function postJson(url, body) {
+    return fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}),
+    }).then(r => r.json());
+  }
+
+  function showResult(el, ok, msg) {
+    el.textContent = msg || (ok ? 'OK' : 'Failed');
+    el.className = 'action-result ' + (ok ? 'ok' : 'err');
+    setTimeout(() => { el.textContent = ''; }, 4000);
+  }
+
+  // -- button mapping rows, built once --
+  for (let i = 0; i < BUTTON_COUNT; i++) {
+    const row = document.createElement('div');
+    row.className = 'rd-row';
+    const label = document.createElement('label');
+    label.textContent = `Button ${i + 1}`;
+    const select = document.createElement('select');
+    select.id = `rd-button-${i}`;
+    BUTTON_ACTIONS.forEach(a => {
+      const opt = document.createElement('option');
+      opt.value = a; opt.textContent = a;
+      select.appendChild(opt);
+    });
+    select.addEventListener('focus', () => { configFocused = true; });
+    select.addEventListener('blur', () => { configFocused = false; });
+    label.appendChild(select);
+    row.appendChild(label);
+    buttonRows.appendChild(row);
+  }
+  shuttleSelect.addEventListener('focus', () => { configFocused = true; });
+  shuttleSelect.addEventListener('blur', () => { configFocused = false; });
+  stepSmall.addEventListener('focus', () => { configFocused = true; });
+  stepSmall.addEventListener('blur', () => { configFocused = false; });
+  stepBig.addEventListener('focus', () => { configFocused = true; });
+  stepBig.addEventListener('blur', () => { configFocused = false; });
+
+  function renderConfig(cfg) {
+    if (configFocused) return;
+    for (let i = 0; i < BUTTON_COUNT; i++) {
+      const select = document.getElementById(`rd-button-${i}`);
+      select.value = (cfg.button_actions && cfg.button_actions[String(i)]) || 'none';
+    }
+    shuttleSelect.value = cfg.shuttle_action || 'none';
+    stepSmall.value = cfg.jog_step_small_hz ?? 10;
+    stepBig.value = cfg.jog_step_big_hz ?? 1000;
+  }
+
+  saveConfigBtn.addEventListener('click', () => {
+    const button_actions = {};
+    for (let i = 0; i < BUTTON_COUNT; i++) {
+      button_actions[String(i)] = document.getElementById(`rd-button-${i}`).value;
+    }
+    postJson('/rigdial/config', {
+      button_actions, shuttle_action: shuttleSelect.value,
+      jog_step_small_hz: parseFloat(stepSmall.value) || 10,
+      jog_step_big_hz: parseFloat(stepBig.value) || 1000,
+    }).then(d => showResult(configResult, d.ok, d.ok ? 'Saved' : d.error))
+      .catch(e => showResult(configResult, false, String(e)));
+  });
+
+  // -- frequency-to-band label, mirrors radio_control.freq_to_band closely
+  // enough for a display hint (server is authoritative for actual control) --
+  const BAND_TABLE = [
+    [1.8, 2.0, '160M'], [3.5, 4.0, '80M'], [5.3, 5.4, '60M'], [7.0, 7.3, '40M'],
+    [10.1, 10.15, '30M'], [14.0, 14.35, '20M'], [18.068, 18.168, '17M'],
+    [21.0, 21.45, '15M'], [24.89, 24.99, '12M'], [28.0, 29.7, '10M'],
+    [50.0, 54.0, '6M'], [70.0, 70.5, '4M'], [144.0, 148.0, '2M'],
+  ];
+  function bandFor(hz) {
+    const mhz = hz / 1e6;
+    for (const [lo, hi, name] of BAND_TABLE) if (mhz >= lo && mhz <= hi) return name;
+    return '--';
+  }
+
+  function renderPresets(presets) {
+    if (presetsFocused) return;
+    presetRows.innerHTML = '';
+    presets.forEach(p => {
+      const tr = document.createElement('tr');
+
+      const nameTd = document.createElement('td');
+      const nameInput = document.createElement('input');
+      nameInput.type = 'text'; nameInput.value = p.name;
+      nameInput.addEventListener('focus', () => { presetsFocused = true; });
+      nameInput.addEventListener('blur', () => {
+        presetsFocused = false;
+        if (nameInput.value.trim() && nameInput.value.trim() !== p.name) {
+          postJson(`/rigdial/presets/${p.id}`, { name: nameInput.value.trim() })
+            .then(d => showResult(presetResult, d.ok, d.ok ? 'Saved' : d.error))
+            .catch(e => showResult(presetResult, false, String(e)));
+        }
+      });
+      nameTd.appendChild(nameInput);
+
+      const freqTd = document.createElement('td');
+      const freqInput = document.createElement('input');
+      freqInput.type = 'text'; freqInput.className = 'freq';
+      freqInput.value = (p.freq_hz / 1e6).toFixed(6);
+      freqInput.addEventListener('focus', () => { presetsFocused = true; });
+      freqInput.addEventListener('blur', () => {
+        presetsFocused = false;
+        const mhz = parseFloat(freqInput.value);
+        if (isFinite(mhz) && mhz > 0 && Math.round(mhz * 1e6) !== p.freq_hz) {
+          postJson(`/rigdial/presets/${p.id}`, { freq_hz: mhz * 1e6 })
+            .then(d => showResult(presetResult, d.ok, d.ok ? 'Saved' : d.error))
+            .catch(e => showResult(presetResult, false, String(e)));
+        }
+      });
+      freqTd.appendChild(freqInput);
+
+      const bandTd = document.createElement('td');
+      bandTd.className = 'band';
+      bandTd.textContent = bandFor(p.freq_hz);
+
+      const applyTd = document.createElement('td');
+      const applyBtn = document.createElement('button');
+      applyBtn.textContent = 'Set Now';
+      applyBtn.addEventListener('click', () => {
+        postJson(`/rigdial/presets/${p.id}/apply`, {})
+          .then(d => showResult(presetResult, d.ok, d.ok ? `Tuned to ${p.name}` : d.error))
+          .catch(e => showResult(presetResult, false, String(e)));
+      });
+      applyTd.appendChild(applyBtn);
+
+      const delTd = document.createElement('td');
+      const delBtn = document.createElement('button');
+      delBtn.textContent = 'Delete'; delBtn.className = 'danger';
+      delBtn.addEventListener('click', () => {
+        postJson(`/rigdial/presets/${p.id}/delete`, {})
+          .then(() => pollStatus())
+          .catch(e => showResult(presetResult, false, String(e)));
+      });
+      delTd.appendChild(delBtn);
+
+      tr.append(nameTd, freqTd, bandTd, applyTd, delTd);
+      presetRows.appendChild(tr);
+    });
+  }
+
+  addBtn.addEventListener('click', () => {
+    const name = newName.value.trim();
+    const mhz = parseFloat(newFreq.value);
+    if (!name) { showResult(presetResult, false, 'Enter a name'); return; }
+    if (!isFinite(mhz) || mhz <= 0) { showResult(presetResult, false, 'Enter a frequency in MHz'); return; }
+    postJson('/rigdial/presets', { name, freq_hz: mhz * 1e6 }).then(d => {
+      if (d.ok) { newName.value = ''; newFreq.value = ''; pollStatus(); }
+      showResult(presetResult, d.ok, d.ok ? 'Added' : d.error);
+    }).catch(e => showResult(presetResult, false, String(e)));
+  });
+
+  function renderStatus(s) {
+    if (s.connected) {
+      rdDot.className = 'dot up';
+      rdConnText.textContent = 'ShuttleXpress connected';
+    } else if (s.hid_available === false) {
+      rdDot.className = 'dot down';
+      rdConnText.textContent = 'hid package/native library not available -- see the note above';
+    } else {
+      rdDot.className = 'dot down';
+      rdConnText.textContent = 'Not connected -- plug in the dial';
+    }
+    rdEvent.textContent = s.last_event ? `Last event: ${s.last_event}` : 'Last event: --';
+    renderConfig(s.config || {});
+    renderPresets(s.presets || []);
+  }
+
+  function pollStatus() {
+    fetch('/rigdial/status').then(r => r.json()).then(renderStatus).catch(err => {
+      rdDot.className = 'dot down';
+      rdConnText.textContent = String(err);
+    });
+  }
+
+  pollStatus();
+  setInterval(pollStatus, 1000);
+})();
+</script>
+{% endblock %}

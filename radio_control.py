@@ -166,6 +166,17 @@ class RigctldClient:
     def set_rfpower(self, fraction: float):
         self._command(f"\\set_level RFPOWER {fraction}")
 
+    def get_miclevel(self) -> float:
+        """Hamlib's MICGAIN level, 0.0-1.0 fraction of max -- not universally
+        supported by every rig backend over CAT (unlike RFPOWER/RIT/XIT,
+        which the IC-7300 backend exposes reliably), so callers should treat
+        a RigctldError here as "this rig/backend doesn't support it" rather
+        than a real failure."""
+        return float(self._command("\\get_level MICGAIN", expect_lines=1)[0])
+
+    def set_miclevel(self, fraction: float):
+        self._command(f"\\set_level MICGAIN {fraction}")
+
     def power_to_watts(self, fraction: float, freq_hz: float, mode: str) -> float:
         mw = float(self._command(f"\\power2mW {fraction} {int(freq_hz)} {mode}", expect_lines=1)[0])
         return mw / 1000.0
@@ -500,6 +511,13 @@ def _rebuild_client(process_cfg: RigctldProcessConfig, timeout_s: float = 2.0):
     _client = RigctldClient(RigctldConfig(
         host=process_cfg.listen_host, port=process_cfg.listen_port, timeout_s=timeout_s,
     ))
+
+
+def get_client() -> Optional[RigctldClient]:
+    """Shared rigctld client for other modules to drive the rig directly
+    (e.g. rigdial_bridge.py) -- mirrors live_monitor.get_monitor(). None
+    until init_radio_control() has run."""
+    return _client
 
 
 def init_radio_control(app, config: RigctldConfig,

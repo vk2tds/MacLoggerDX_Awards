@@ -28,6 +28,7 @@ import dxcc_challenge
 import live_monitor
 import qsl_helper
 import radio_control
+import rigdial
 import wsjtx_remote
 
 log = logging.getLogger("app." + __name__)
@@ -85,6 +86,8 @@ radio_control.init_radio_control(app, radio_control.RigctldConfig(
     port=4532,
 ))
 
+rigdial.init_rigdial(app)
+
 
 @app.route('/')
 def index():
@@ -105,6 +108,11 @@ def dxcc_view():
         return render_template('error.html', error=state['error'])
     challenge = dxcc_challenge.build_challenge(analysis.rawtable)
     return render_template('dxcc.html', challenge=challenge, last_refreshed=state['last_refreshed'])
+
+
+@app.route('/help')
+def help_view():
+    return render_template('help.html')
 
 
 @app.route('/refresh', methods=['POST'])

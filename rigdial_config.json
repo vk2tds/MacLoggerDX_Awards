@@ -1,0 +1,12 @@
+{
+  "button_actions": {
+    "0": "ptt",
+    "1": "none",
+    "2": "step_toggle",
+    "3": "mod_micgain",
+    "4": "mod_power"
+  },
+  "shuttle_action": "cycle_presets",
+  "jog_step_small_hz": 10.0,
+  "jog_step_big_hz": 1000.0
+}

@@ -4,3 +4,7 @@ numpy
 tabulate
 python-dateutil
 pyobjc-framework-Quartz; sys_platform == "darwin"
+# RigDial tab (Contour ShuttleXpress). Also needs a native hidapi library
+# installed separately, e.g. `port install hidapi` or `brew install hidapi`
+# -- pip alone doesn't provide it.
+hid
