@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}DX Monitor{% endblock %}
+{% block content %}
+<h1>DX Monitor</h1>
+<p style="color:#666; font-size:0.85rem; max-width:60em; margin-top:-0.5rem;">
+  Same live decode feed as <a href="{{ url_for('live.live_view') }}">Live Monitor</a>, grouped by DXCC
+  entity instead of shown as a flat log -- most recently-heard entity on top, with up to 3 of its most
+  recently-heard distinct callsigns underneath. Colors match Live Monitor's worked/confirmed/none
+  scheme, scoped to band.
+</p>
+
+<style>
+  .dx-toolbar { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.75rem; font-size: 0.9rem; }
+  #dx-conn-dot { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 50%; background: #999; }
+  #dx-conn-dot.up { background: #2e7d32; }
+  #dx-conn-dot.down { background: #c62828; }
+
+  .dx-group { border: 1px solid #ccc; border-radius: 6px; padding: 0.5rem 0.85rem; margin-bottom: 0.5rem; max-width: 42em; }
+  .dx-header { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; font-weight: 600; font-size: 0.95rem; margin-bottom: 0.3rem; border-bottom: 1px solid #eee; padding-bottom: 0.25rem; }
+  .dx-band { font-size: 0.78rem; color: #666; font-weight: 400; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+  .dx-call-row { display: flex; gap: 1.2rem; font-size: 0.85rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; padding: 0.1rem 0; }
+  .dx-call { min-width: 8em; }
+  .dx-snr { min-width: 4em; color: #555; }
+  .dx-time { color: #888; }
+  .dx-empty { color: #888; font-size: 0.85rem; }
+
+  .status-confirmed { color: #2e7d32; font-weight: 600; }
+  .status-worked { color: #e67e22; font-weight: 600; }
+  .status-none { color: #c62828; }
+  .status-unknown { color: inherit; }
+</style>
+
+<div class="dx-toolbar">
+  <span id="dx-conn-dot"></span> <span id="dx-conn-text">connecting…</span>
+</div>
+
+<div id="dx-entities"></div>
+
+<script>
+(function () {
+  const dot = document.getElementById('dx-conn-dot');
+  const connText = document.getElementById('dx-conn-text');
+  const container = document.getElementById('dx-entities');
+
+  // dxcc_name -> { band, delta_freq_hz, entity_status, lastTime, calls: Map<call, {snr, time_ms, call_status}> }
+  const entities = new Map();
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function fmtTime(ms) {
+    if (ms === null || ms === undefined) return '';
+    const totalSec = Math.floor(ms / 1000);
+    const h = String(Math.floor(totalSec / 3600) % 24).padStart(2, '0');
+    const m = String(Math.floor(totalSec / 60) % 60).padStart(2, '0');
+    const s = String(totalSec % 60).padStart(2, '0');
+    return `${h}:${m}:${s}`;
+  }
+
+  function statusClass(status) {
+    return 'status-' + (status || 'unknown');
+  }
+
+  function handleDecode(ev) {
+    if (!ev.call || !ev.dxcc_name) return; // unresolvable/hashed calls -- nothing to group by
+    let group = entities.get(ev.dxcc_name);
+    if (!group) {
+      group = { calls: new Map() };
+      entities.set(ev.dxcc_name, group);
+    }
+    group.band = ev.band;
+    group.delta_freq_hz = ev.delta_freq_hz;
+    group.entity_status = ev.entity_status;
+    group.lastTime = ev.time_ms;
+    group.calls.set(ev.call, { snr: ev.snr, time_ms: ev.time_ms, call_status: ev.call_status });
+    if (group.calls.size > 3) {
+      let oldestCall = null, oldestTime = Infinity;
+      for (const [call, info] of group.calls) {
+        if ((info.time_ms ?? 0) < oldestTime) { oldestTime = info.time_ms ?? 0; oldestCall = call; }
+      }
+      if (oldestCall !== null) group.calls.delete(oldestCall);
+    }
+  }
+
+  function renderAll() {
+    if (entities.size === 0) {
+      container.innerHTML = '<p class="dx-empty">No decodes yet -- waiting for WSJT-X.</p>';
+      return;
+    }
+    const sorted = Array.from(entities.entries()).sort((a, b) => (b[1].lastTime ?? 0) - (a[1].lastTime ?? 0));
+    container.innerHTML = sorted.map(([name, group]) => {
+      const calls = Array.from(group.calls.entries()).sort((a, b) => (b[1].time_ms ?? 0) - (a[1].time_ms ?? 0));
+      const freqBit = (group.delta_freq_hz !== undefined && group.delta_freq_hz !== null) ? ` @ ${group.delta_freq_hz} Hz` : '';
+      const callRows = calls.map(([call, info]) => `
+        <div class="dx-call-row">
+          <span class="dx-call ${statusClass(info.call_status && info.call_status.band)}">${escapeHtml(call)}</span>
+          <span class="dx-snr">${info.snr ?? ''} dB</span>
+          <span class="dx-time">${fmtTime(info.time_ms)}</span>
+        </div>
+      `).join('');
+      return `
+        <div class="dx-group">
+          <div class="dx-header">
+            <span class="${statusClass(group.entity_status && group.entity_status.band)}">${escapeHtml(name)}</span>
+            <span class="dx-band">${group.band || ''}${freqBit}</span>
+          </div>
+          ${callRows}
+        </div>
+      `;
+    }).join('');
+  }
+
+  function connect() {
+    const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+    const ws = new WebSocket(proto + location.host + '/live/ws');
+    ws.onopen = () => { dot.className = 'up'; connText.textContent = 'connected'; };
+    ws.onclose = () => { dot.className = 'down'; connText.textContent = 'disconnected -- retrying...'; setTimeout(connect, 2000); };
+    ws.onerror = () => ws.close();
+    ws.onmessage = (msg) => {
+      let ev;
+      try { ev = JSON.parse(msg.data); } catch (e) { return; }
+      if (ev.kind === 'decode') { handleDecode(ev); renderAll(); }
+      else if (ev.kind === 'clear') { entities.clear(); renderAll(); }
+    };
+  }
+
+  fetch('/live/history').then(r => r.json()).then(events => {
+    events.forEach(ev => { if (ev.kind === 'decode') handleDecode(ev); });
+    renderAll();
+  }).catch(() => {}).finally(connect);
+})();
+</script>
+{% endblock %}

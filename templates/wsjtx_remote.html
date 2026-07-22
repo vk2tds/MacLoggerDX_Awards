@@ -38,6 +38,15 @@
   table.remote-table tbody tr:hover { background: #eef6ff; cursor: pointer; }
   .row-cq { background: #c9f2c9; }
   .call-link { text-decoration: underline dotted; cursor: pointer; }
+
+  /* Worked/confirmed/none coloring for Call and DXCC cells -- same palette
+     as Live Monitor's col-call/col-dxcc, fixed to the "band" scope since
+     this tab has no scope-selector checkboxes (it's inherently tied to
+     whatever band/mode WSJT-X is currently on). */
+  .status-confirmed { color: #2e7d32; font-weight: 600; }
+  .status-worked { color: #e67e22; font-weight: 600; }
+  .status-none { color: #c62828; }
+  .status-unknown { color: inherit; }
   .qrz-link { color: #888; text-decoration: none; font-size: 0.7rem; border: 1px solid #ccc; border-radius: 3px; padding: 0 0.25rem; margin-left: 0.25rem; }
   .qrz-link:hover { color: #1565c0; border-color: #1565c0; }
   .history-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.4rem; font-size: 0.82rem; margin: 0.6rem 0; }
@@ -115,7 +124,7 @@
     <div class="remote-panel">
       <div class="remote-panel-scroll">
         <table class="remote-table">
-          <thead><tr><th>UTC</th><th>dB</th><th>DT</th><th>Freq</th><th>Call</th><th>Message</th></tr></thead>
+          <thead><tr><th>UTC</th><th>dB</th><th>DT</th><th>Freq</th><th>Call</th><th>DXCC</th><th>Message</th></tr></thead>
           <tbody id="band-activity-body"></tbody>
         </table>
       </div>
@@ -123,7 +132,7 @@
     <div class="remote-panel">
       <div class="remote-panel-scroll">
         <table class="remote-table">
-          <thead><tr><th>UTC</th><th>dB</th><th>DT</th><th>Freq</th><th>Call</th><th>Message</th></tr></thead>
+          <thead><tr><th>UTC</th><th>dB</th><th>DT</th><th>Freq</th><th>Call</th><th>DXCC</th><th>Message</th></tr></thead>
           <tbody id="rx-freq-body"></tbody>
         </table>
       </div>
@@ -360,6 +369,10 @@
     return `${h}:${m}:${s}`;
   }
 
+  function statusClass(status) {
+    return 'status-' + (status || 'unknown');
+  }
+
   function fmtDt(dt) {
     return (dt === null || dt === undefined) ? '' : dt.toFixed(1);
   }
@@ -444,7 +457,8 @@
       <td>${ev.snr ?? ''}</td>
       <td>${fmtDt(dt)}</td>
       <td>${ev.delta_freq_hz ?? ''}</td>
-      <td><span class="call-link">${ev.call || ''}</span>${ev.call ? `<a class="qrz-link" href="https://www.qrz.com/db/${encodeURIComponent(ev.call)}" target="_blank" rel="noopener">QRZ</a>` : ''}</td>
+      <td class="${statusClass(ev.call_status && ev.call_status.band)}"><span class="call-link">${ev.call || ''}</span>${ev.call ? `<a class="qrz-link" href="https://www.qrz.com/db/${encodeURIComponent(ev.call)}" target="_blank" rel="noopener">QRZ</a>` : ''}</td>
+      <td class="${statusClass(ev.entity_status && ev.entity_status.band)}">${ev.dxcc_name || ''}</td>
       <td>${ev.message || ''}</td>
     `;
     tr.title = 'Double-click to call ' + (ev.call || 'this station');

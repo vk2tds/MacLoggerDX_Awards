@@ -508,6 +508,15 @@ def live_view():
     )
 
 
+@live_bp.route("/live/entities")
+def live_entities_view():
+    """Same live decode feed as Live Monitor (/live/history + /live/ws),
+    grouped client-side by DXCC entity instead of shown as a flat log --
+    see templates/live_entities.html. No server-side grouping needed since
+    every decode event already carries dxcc_name/entity_status/call_status."""
+    return render_template("live_entities.html")
+
+
 @live_bp.route("/live/history")
 def live_history():
     if _monitor is None:
