@@ -88,7 +88,15 @@
       container.innerHTML = '<p class="dx-empty">No decodes yet -- waiting for WSJT-X.</p>';
       return;
     }
-    const sorted = Array.from(entities.entries()).sort((a, b) => (b[1].lastTime ?? 0) - (a[1].lastTime ?? 0));
+    // Confirmed (green) entities always sink to the bottom, regardless of
+    // recency -- they're no longer what you're watching for. Within each
+    // tier, most-recently-heard stays on top.
+    const isConfirmed = ([, group]) => (group.entity_status && group.entity_status.band) === 'confirmed';
+    const sorted = Array.from(entities.entries()).sort((a, b) => {
+      const aConfirmed = isConfirmed(a), bConfirmed = isConfirmed(b);
+      if (aConfirmed !== bConfirmed) return aConfirmed ? 1 : -1;
+      return (b[1].lastTime ?? 0) - (a[1].lastTime ?? 0);
+    });
     container.innerHTML = sorted.map(([name, group]) => {
       const calls = Array.from(group.calls.entries()).sort((a, b) => (b[1].time_ms ?? 0) - (a[1].time_ms ?? 0));
       const freqBit = (group.delta_freq_hz !== undefined && group.delta_freq_hz !== null) ? ` @ ${group.delta_freq_hz} Hz` : '';

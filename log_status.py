@@ -36,10 +36,26 @@ CONFIRMED_LIKE = "(qsl_received LIKE '%LoTW%' OR qsl_received LIKE '%eQSL%' OR q
 
 
 def _is_lotw(qsl_received: Optional[str]) -> bool:
-    """Strict LoTW-only confirmation check, for the Live Monitor's
-    green/orange/red colouring (as distinct from CONFIRMED_LIKE, which the
-    rest of the app treats as LoTW/eQSL/card all being equally 'confirmed')."""
+    """Strict LoTW-only confirmation check. Used only where that specific
+    distinction matters -- e.g. the callsign-history modal's "Confirmed
+    (LoTW)" vs "Confirmed (eQSL/card)" label needs to know it was actually
+    LoTW, not just "confirmed somehow". For the Live Monitor/DX Monitor/
+    Remote green/orange/red colouring, see _is_lotw_or_cardc() instead."""
     return bool(qsl_received) and "LOTW" in qsl_received.upper()
+
+
+def _is_lotw_or_cardc(qsl_received: Optional[str]) -> bool:
+    """LoTW OR a physical QSL card actually in hand -- MacLoggerDX logs
+    that as a "CardC:<date>" entry in qsl_received (there may be other text
+    on the same line). This is the confirmation check for the Call/DXCC/
+    Grid green/orange/red colouring on Live Monitor, DX Monitor, and
+    Remote (user request 2026-07-24) -- deliberately narrower than
+    CONFIRMED_LIKE, which also counts eQSL and a bare "Card" entry; those
+    stay orange here."""
+    if not qsl_received:
+        return False
+    upper = qsl_received.upper()
+    return "LOTW" in upper or "CARDC" in upper
 
 
 def _empty_scoped_index() -> dict:
@@ -61,7 +77,7 @@ def _build_scoped_index(rows) -> dict:
     for key, band, mode, qsl_received in rows:
         if key is None:
             continue
-        confirmed = _is_lotw(qsl_received)
+        confirmed = _is_lotw_or_cardc(qsl_received)
         idx["worked"]["overall"].add(key)
         if confirmed:
             idx["confirmed"]["overall"].add(key)
@@ -117,6 +133,14 @@ class CallStatus:
     confirmed_lotw_this_band: bool = False
     confirmed_lotw_this_mode: bool = False
     confirmed_lotw_band_and_mode: bool = False
+    # LoTW OR physical-card-in-hand (CardC:) -- see _is_lotw_or_cardc().
+    # Used only for the live Call-cell colouring (status_for_scope), kept
+    # separate from confirmed_lotw_* above since that's still needed
+    # verbatim for the callsign-history modal's LoTW-specific label.
+    confirmed_lotw_or_card_ever: bool = False
+    confirmed_lotw_or_card_this_band: bool = False
+    confirmed_lotw_or_card_this_mode: bool = False
+    confirmed_lotw_or_card_band_and_mode: bool = False
     qso_count: int = 0
     last_worked: Optional[str] = None
     dxcc_country: Optional[str] = None
@@ -127,15 +151,17 @@ class CallStatus:
 
     def status_for_scope(self, use_band: bool, use_mode: bool) -> str:
         """One of 'confirmed' / 'worked' / 'none', for the given band/mode
-        scope -- used to colour the Call cell in the Live Monitor table."""
+        scope -- used to colour the Call cell in the Live Monitor table.
+        'confirmed' here means LoTW or a physical card in hand (CardC:) --
+        see confirmed_lotw_or_card_* / _is_lotw_or_cardc()."""
         if use_band and use_mode:
-            worked, confirmed = self.worked_this_band_and_mode, self.confirmed_lotw_band_and_mode
+            worked, confirmed = self.worked_this_band_and_mode, self.confirmed_lotw_or_card_band_and_mode
         elif use_band:
-            worked, confirmed = self.worked_this_band, self.confirmed_lotw_this_band
+            worked, confirmed = self.worked_this_band, self.confirmed_lotw_or_card_this_band
         elif use_mode:
-            worked, confirmed = self.worked_this_mode, self.confirmed_lotw_this_mode
+            worked, confirmed = self.worked_this_mode, self.confirmed_lotw_or_card_this_mode
         else:
-            worked, confirmed = self.worked_before, self.confirmed_lotw_ever
+            worked, confirmed = self.worked_before, self.confirmed_lotw_or_card_ever
         if confirmed:
             return "confirmed"
         if worked:
@@ -345,6 +371,7 @@ class LogStatusChecker:
                 return any(tag in qsl_u for tag in ("LOTW", "EQSL", "CARD"))
             status.confirmed_ever = any(_confirmed(r.get("qsl_received")) for r in row_dicts)
             status.confirmed_lotw_ever = any(_is_lotw(r.get("qsl_received")) for r in row_dicts)
+            status.confirmed_lotw_or_card_ever = any(_is_lotw_or_cardc(r.get("qsl_received")) for r in row_dicts)
             if band:
                 status.confirmed_this_band = any(
                     r.get("band_rx") == band and _confirmed(r.get("qsl_received")) for r in row_dicts
@@ -352,13 +379,23 @@ class LogStatusChecker:
                 status.confirmed_lotw_this_band = any(
                     r.get("band_rx") == band and _is_lotw(r.get("qsl_received")) for r in row_dicts
                 )
+                status.confirmed_lotw_or_card_this_band = any(
+                    r.get("band_rx") == band and _is_lotw_or_cardc(r.get("qsl_received")) for r in row_dicts
+                )
             if mode:
                 status.confirmed_lotw_this_mode = any(
                     r.get("mode") == mode and _is_lotw(r.get("qsl_received")) for r in row_dicts
                 )
+                status.confirmed_lotw_or_card_this_mode = any(
+                    r.get("mode") == mode and _is_lotw_or_cardc(r.get("qsl_received")) for r in row_dicts
+                )
             if band and mode:
                 status.confirmed_lotw_band_and_mode = any(
                     r.get("band_rx") == band and r.get("mode") == mode and _is_lotw(r.get("qsl_received"))
+                    for r in row_dicts
+                )
+                status.confirmed_lotw_or_card_band_and_mode = any(
+                    r.get("band_rx") == band and r.get("mode") == mode and _is_lotw_or_cardc(r.get("qsl_received"))
                     for r in row_dicts
                 )
 

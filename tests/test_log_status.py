@@ -108,3 +108,66 @@ def test_missing_database_reports_error_not_crash(tmp_path):
     checker = LogStatusChecker(str(tmp_path / "does_not_exist.sql"), "qso_table_v008")
     status = checker.lookup("VK2ABC")
     assert status.error is not None
+
+
+@pytest.fixture()
+def cardc_db_path():
+    """Separate fixture (rather than adding rows to db_path) so this
+    doesn't disturb the row-count/worked assertions the other tests make
+    against that shared fixture."""
+    fd, path = tempfile.mkstemp(suffix=".sql")
+    os.close(fd)
+    conn = sqlite3.connect(path)
+    conn.execute(
+        """
+        CREATE TABLE qso_table_v008 (
+            call TEXT, dxcc_country TEXT, dxcc_id INTEGER, cq_zone TEXT,
+            band_rx TEXT, mode TEXT, qsl_sent TEXT, qsl_received TEXT, grid TEXT
+        )
+        """
+    )
+    rows = [
+        # Physical card in hand, no LoTW -- should count as "confirmed" for
+        # the live status coloring (confirmed_lotw_or_card_*) but NOT for
+        # the strict LoTW-only fields (confirmed_lotw_*), since the
+        # callsign-history modal needs to keep saying "eQSL/card", not
+        # falsely claim LoTW.
+        ("7X2ABC", "Algeria", 400, "33", "20M", "FT8", "", "CardC:20250304", "MM12aa"),
+        # eQSL only -- CONFIRMED_LIKE/confirmed_ever counts this, but the
+        # narrower CardC-or-LoTW check must not (user asked for "Just
+        # CardC", not eQSL).
+        ("7X3DEF", "Algeria", 400, "33", "40M", "FT8", "", "eQSL: 20240101", "MM12bb"),
+    ]
+    conn.executemany(
+        "INSERT INTO qso_table_v008 (call, dxcc_country, dxcc_id, cq_zone, band_rx, mode, qsl_sent, qsl_received, grid) VALUES (?,?,?,?,?,?,?,?,?)",
+        rows,
+    )
+    conn.commit()
+    conn.close()
+    yield path
+    os.unlink(path)
+
+
+def test_cardc_counts_as_confirmed_for_live_status_not_for_lotw_field(cardc_db_path):
+    checker = LogStatusChecker(cardc_db_path, "qso_table_v008")
+    status = checker.lookup("7X2ABC", band="20M", mode="FT8")
+    assert status.confirmed_ever is True  # CONFIRMED_LIKE already covers CardC
+    assert status.confirmed_lotw_ever is False  # not actually LoTW
+    assert status.confirmed_lotw_or_card_ever is True  # but counts for live coloring
+    assert status.confirmed_lotw_or_card_this_band is True
+    assert status.status_for_scope(True, False) == "confirmed"  # Call cell colouring
+
+
+def test_eqsl_alone_does_not_count_as_cardc_confirmed(cardc_db_path):
+    checker = LogStatusChecker(cardc_db_path, "qso_table_v008")
+    status = checker.lookup("7X3DEF", band="40M", mode="FT8")
+    assert status.confirmed_ever is True  # CONFIRMED_LIKE counts eQSL
+    assert status.confirmed_lotw_or_card_ever is False  # neither LoTW nor CardC
+    assert status.status_for_scope(True, False) == "worked"  # not "confirmed"
+
+
+def test_entity_status_scoped_index_treats_cardc_as_confirmed(cardc_db_path):
+    checker = LogStatusChecker(cardc_db_path, "qso_table_v008")
+    checker.refresh_worked_sets()
+    scopes = checker.entity_status_all_scopes(400, "20M", "FT8")
+    assert scopes["band"] == "confirmed"

@@ -290,14 +290,14 @@ Notes:
     V7#                Marshall Is.                       OC    65    31    168
     V8                 Brunei Darussalam                  OC    54    28    345
     VA-VG,VO,VY#       Canada                             NA    (H)   01-05 001
-    VK# 	       Australia                          OC    (I)   29,30 150
-    VK#                Heard I.                           AF    68    39    111    
-    VK7#               Macquarie I.                       OC    60    30    153    
-    VK9#               Cocos (Keeling) Is.                OC    54    29    038     
-    VK#	               Lord Howe I.                       OC    60    30    147    
-    VK9#               Mellish Reef                       OC    56    30    171    
-    VK9                Norfolk I.                         OC    60    32    189     
-    VK9#               Willis I.                          OC    55    30    303    
+    VK,AX#             Australia                          OC    (I)   29,30 150
+    VK0#               Heard I.                           AF    68    39    111
+    VK0#               Macquarie I.                       OC    60    30    153
+    VK9C#              Cocos (Keeling) Is.                OC    54    29    038
+    VK9L#              Lord Howe I.                       OC    60    30    147
+    VK9M#              Mellish Reef                       OC    56    30    171
+    VK9N               Norfolk I.                         OC    60    32    189
+    VK9W#              Willis I.                          OC    55    30    303
     VK9#               Christmas I.                       OC    54    29    035     
     VP2E(37)           Anguilla                           NA    11    08    012
     VP2M(37)           Montserrat                         NA    11    08    096

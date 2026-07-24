@@ -97,6 +97,43 @@ try:
 finally:
     os.rmdir(tmp_dir)
 
+
+def make_cardc_db():
+    fd, path = tempfile.mkstemp(suffix=".sql")
+    os.close(fd)
+    conn = sqlite3.connect(path)
+    conn.execute(
+        """
+        CREATE TABLE qso_table_v008 (
+            call TEXT, dxcc_country TEXT, dxcc_id INTEGER, cq_zone TEXT,
+            band_rx TEXT, mode TEXT, qsl_sent TEXT, qsl_received TEXT, grid TEXT
+        )
+        """
+    )
+    rows = [
+        ("7X2ABC", "Algeria", 400, "33", "20M", "FT8", "", "CardC:20250304", "MM12aa"),
+        ("7X3DEF", "Algeria", 400, "33", "40M", "FT8", "", "eQSL: 20240101", "MM12bb"),
+    ]
+    conn.executemany(
+        "INSERT INTO qso_table_v008 (call, dxcc_country, dxcc_id, cq_zone, band_rx, mode, qsl_sent, qsl_received, grid) VALUES (?,?,?,?,?,?,?,?,?)",
+        rows,
+    )
+    conn.commit()
+    conn.close()
+    return path
+
+
+for fn_name in (
+    "test_cardc_counts_as_confirmed_for_live_status_not_for_lotw_field",
+    "test_eqsl_alone_does_not_count_as_cardc_confirmed",
+    "test_entity_status_scoped_index_treats_cardc_as_confirmed",
+):
+    cdb_path = make_cardc_db()
+    try:
+        run(f"test_log_status.{fn_name}", getattr(tls, fn_name), cdb_path)
+    finally:
+        os.unlink(cdb_path)
+
 # -- test_log_writer.py, with hand-rolled fixtures --
 import test_log_writer as tlw  # noqa: E402
 
