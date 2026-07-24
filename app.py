@@ -26,6 +26,7 @@ import macloggerdx_awards
 import awards_tree
 import dxcc_challenge
 import live_monitor
+import logbook
 import qsl_helper
 import radio_control
 import rigdial
@@ -87,6 +88,8 @@ radio_control.init_radio_control(app, radio_control.RigctldConfig(
 ))
 
 rigdial.init_rigdial(app)
+
+logbook.init_logbook(app, analysis.database_name, analysis.qso_table)
 
 
 @app.route('/')

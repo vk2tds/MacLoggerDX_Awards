@@ -1,0 +1,286 @@
+{% extends "base.html" %}
+{% block title %}Logbook{% endblock %}
+{% block content %}
+<h1>Logbook</h1>
+<p style="color:#666; font-size:0.85rem; max-width:60em; margin-top:-0.5rem;">
+  A view of the MacLoggerDX log itself -- not the live WSJT-X decode feed (see
+  <a href="{{ url_for('live.live_view') }}">Live Monitor</a>). Recent QSOs (with a Live toggle to
+  follow along as they're logged, or pick a year/month to browse history), a button to kick off
+  MacLoggerDX's own LoTW confirmation check, and recently-confirmed QSOs sorted by confirmation date.
+  Decade browsing isn't built yet.
+</p>
+
+<style>
+  .lb-shell { background: #ececec; border: 1px solid #b8b8b8; border-radius: 8px; padding: 0.75rem; font-family: -apple-system, "Segoe UI", sans-serif; color: #111; margin-bottom: 1rem; }
+  .lb-row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 0.6rem; font-size: 0.85rem; }
+  .lb-row input[type=number] { width: 5em; font-size: 0.85rem; padding: 0.2rem 0.3rem; }
+  .lb-row button { cursor: pointer; border: 1px solid #999; background: #f4f4f4; border-radius: 3px; padding: 0.3rem 0.7rem; font-size: 0.85rem; }
+  .lb-row button:hover { background: #e6e6e6; }
+  #lb-year { font-size: 0.85rem; padding: 0.25rem 0.4rem; }
+  .lb-month-row { display: flex; gap: 2px; flex-wrap: wrap; }
+  .lb-month-row button.current { background: #2e9c4a; color: #fff; border-color: #2e9c4a; }
+  .lb-month-row button.current:hover { background: #278a41; }
+
+  .lb-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .lb-table th, .lb-table td { padding: 0.2rem 0.5rem; text-align: left; white-space: nowrap; }
+  .lb-table thead th { position: sticky; top: 0; background: #eee; border-bottom: 1px solid #ccc; font-weight: 600; }
+  .lb-table tbody tr:hover { background: #f5f5f5; }
+  .lb-table-scroll { max-height: 50vh; overflow-y: auto; overflow-x: auto; }
+
+  .badge { display: inline-block; border-radius: 3px; padding: 0 0.35rem; font-size: 0.72rem; }
+  .badge-LoTW { background: #28a745; color: #fff; }
+  .badge-Card { background: #2f6fed; color: #fff; }
+  .badge-eQSL { background: #ddd; color: #555; }
+
+  .action-result { font-size: 0.78rem; margin-left: 0.5rem; }
+  .action-result.ok { color: #2e7d32; }
+  .action-result.err { color: #c62828; }
+  .lb-empty { color: #888; font-size: 0.85rem; }
+</style>
+
+<div class="lb-shell">
+  <h3 style="margin: 0 0 0.5rem;">Recent QSOs</h3>
+  <div class="lb-row">
+    <label>Last <input type="number" id="lb-hours" value="36" min="1"> hours</label>
+    <button id="lb-recent-refresh">Refresh</button>
+    <label><input type="checkbox" id="lb-live"> Live</label>
+    <span id="lb-live-status" style="font-size:0.78rem; color:#888;"></span>
+    <span class="action-result" id="lb-recent-result"></span>
+  </div>
+  <div class="lb-row">
+    <select id="lb-year"></select>
+    <div class="lb-month-row" id="lb-month-row">
+      <button data-month="1">Jan</button>
+      <button data-month="2">Feb</button>
+      <button data-month="3">Mar</button>
+      <button data-month="4">Apr</button>
+      <button data-month="5">May</button>
+      <button data-month="6">Jun</button>
+      <button data-month="7">Jul</button>
+      <button data-month="8">Aug</button>
+      <button data-month="9">Sep</button>
+      <button data-month="10">Oct</button>
+      <button data-month="11">Nov</button>
+      <button data-month="12">Dec</button>
+    </div>
+  </div>
+  <div class="lb-table-scroll">
+    <table class="lb-table">
+      <thead><tr><th>UTC</th><th>Band</th><th>Mode</th><th>Call</th><th>DXCC</th><th>Grid</th><th>RST S</th><th>RST R</th><th>QSL</th></tr></thead>
+      <tbody id="lb-recent-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="lb-shell">
+  <h3 style="margin: 0 0 0.5rem;">Confirmations</h3>
+  <div class="lb-row">
+    <button id="lb-check-lotw">Check LoTW Now</button>
+    <button id="lb-check-eqsl" style="display:none;">Check eQSL Now</button>
+    <span class="action-result" id="lb-check-result"></span>
+  </div>
+  <p style="font-size:0.75rem; color:#888; margin:0 0 0.6rem;">
+    Triggers MacLoggerDX's own confirmation check (same as its menu) -- it accepts the request
+    immediately, but the actual LoTW/eQSL download happens in MacLoggerDX itself and may take a
+    little while. Refresh the table below afterward to see new confirmations.
+  </p>
+  <div class="lb-row">
+    <label>Last <input type="number" id="lb-months" value="3" min="1"> months</label>
+    <button id="lb-confirm-refresh">Refresh</button>
+    <span class="action-result" id="lb-confirm-result"></span>
+  </div>
+  <div class="lb-table-scroll">
+    <table class="lb-table">
+      <thead><tr><th>Confirmed</th><th>Via</th><th>Call</th><th>DXCC</th><th>Band</th><th>Mode</th><th>QSO date</th></tr></thead>
+      <tbody id="lb-confirm-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+(function () {
+  function postJson(url, body) {
+    return fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}),
+    }).then(r => r.json());
+  }
+
+  function showResult(el, ok, msg) {
+    el.textContent = msg || (ok ? 'OK' : 'Failed');
+    el.className = 'action-result ' + (ok ? 'ok' : 'err');
+    setTimeout(() => { el.textContent = ''; }, 6000);
+  }
+
+  function fmtUtc(epochS) {
+    if (!epochS) return '';
+    const d = new Date(epochS * 1000);
+    return d.toISOString().slice(0, 16).replace('T', ' ');
+  }
+
+  function fmtConfirmedDate(yyyymmdd) {
+    if (!yyyymmdd || yyyymmdd.length !== 8) return yyyymmdd || '';
+    return `${yyyymmdd.slice(0, 4)}-${yyyymmdd.slice(4, 6)}-${yyyymmdd.slice(6, 8)}`;
+  }
+
+  function badge(label) {
+    return label ? `<span class="badge badge-${label}">${label}</span>` : '';
+  }
+
+  // -- Recent QSOs --
+  const hoursInput = document.getElementById('lb-hours');
+  const recentBody = document.getElementById('lb-recent-body');
+  const recentResult = document.getElementById('lb-recent-result');
+  const yearSelect = document.getElementById('lb-year');
+  const monthRow = document.getElementById('lb-month-row');
+
+  function renderRecentRows(rows) {
+    if (!rows.length) {
+      recentBody.innerHTML = '<tr><td colspan="9" class="lb-empty">No QSOs in this window.</td></tr>';
+      return;
+    }
+    recentBody.innerHTML = rows.map(r => `
+      <tr>
+        <td>${fmtUtc(r.qso_start)}</td>
+        <td>${r.band_tx || r.band_rx || ''}</td>
+        <td>${r.mode || ''}</td>
+        <td>${r.call || ''}</td>
+        <td>${r.dxcc_country || ''}</td>
+        <td>${r.grid || ''}</td>
+        <td>${r.rst_sent || ''}</td>
+        <td>${r.rst_received || ''}</td>
+        <td>${badge(r.qsl_badge)}</td>
+      </tr>
+    `).join('');
+  }
+
+  function clearMonthSelection() {
+    monthRow.querySelectorAll('button').forEach(b => b.classList.remove('current'));
+  }
+
+  function loadRecent() {
+    clearMonthSelection();
+    const hours = parseFloat(hoursInput.value) || 36;
+    fetch(`/logbook/recent?hours=${hours}`).then(r => r.json()).then(rows => {
+      if (rows.error) { showResult(recentResult, false, rows.error); return; }
+      renderRecentRows(rows);
+    }).catch(e => showResult(recentResult, false, String(e)));
+  }
+  document.getElementById('lb-recent-refresh').addEventListener('click', loadRecent);
+
+  // -- Year/month history browsing: pick a year from the dropdown, then a
+  // month button to load that whole calendar month. Selecting a month
+  // implies you're not watching "recent" anymore, so it turns Live off --
+  // otherwise a live qso_logged event would silently refetch the rolling
+  // "last N hours" window over whatever month you were looking at.
+  const thisYear = new Date().getUTCFullYear();
+  for (let y = thisYear; y >= 1990; y--) {
+    const opt = document.createElement('option');
+    opt.value = y; opt.textContent = y;
+    yearSelect.appendChild(opt);
+  }
+
+  function loadMonth(monthBtn) {
+    if (liveBox.checked) { liveBox.checked = false; liveBox.dispatchEvent(new Event('change')); }
+    clearMonthSelection();
+    monthBtn.classList.add('current');
+    const year = parseInt(yearSelect.value, 10);
+    const month = parseInt(monthBtn.dataset.month, 10);
+    fetch(`/logbook/month?year=${year}&month=${month}`).then(r => r.json()).then(rows => {
+      if (rows.error) { showResult(recentResult, false, rows.error); return; }
+      renderRecentRows(rows);
+    }).catch(e => showResult(recentResult, false, String(e)));
+  }
+
+  monthRow.querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', () => loadMonth(btn));
+  });
+
+  yearSelect.addEventListener('change', () => {
+    const current = monthRow.querySelector('button.current');
+    if (current) loadMonth(current);
+  });
+
+  // -- Live toggle: subscribe to the same /live/ws feed every other tab
+  // uses (no backend changes needed) and just refetch Recent QSOs when
+  // WSJT-X reports a QSO was logged -- that event only carries a callsign
+  // (live_monitor.py's qso_logged broadcast), not full QSO fields, so
+  // there's nothing to incrementally splice in; a plain refetch is both
+  // simpler and correct. Small delay since MacLoggerDX ingests the same
+  // UDP broadcast independently and needs a moment to write its own row.
+  const liveBox = document.getElementById('lb-live');
+  const liveStatus = document.getElementById('lb-live-status');
+  let liveWs = null;
+
+  function connectLive() {
+    const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+    const ws = new WebSocket(proto + location.host + '/live/ws');
+    liveWs = ws;
+    ws.onopen = () => { liveStatus.textContent = 'connected'; };
+    ws.onclose = () => {
+      if (liveWs !== ws) return; // superseded by a newer connection or turned off
+      liveStatus.textContent = 'disconnected -- retrying...';
+      setTimeout(() => { if (liveBox.checked) connectLive(); }, 2000);
+    };
+    ws.onerror = () => ws.close();
+    ws.onmessage = (msg) => {
+      let ev;
+      try { ev = JSON.parse(msg.data); } catch (e) { return; }
+      if (ev.kind === 'qso_logged') setTimeout(loadRecent, 1500);
+    };
+  }
+
+  liveBox.addEventListener('change', () => {
+    if (liveBox.checked) {
+      liveStatus.textContent = 'connecting…';
+      connectLive();
+    } else {
+      const ws = liveWs;
+      liveWs = null;
+      if (ws) ws.close();
+      liveStatus.textContent = '';
+    }
+  });
+
+  // -- Confirmations --
+  const monthsInput = document.getElementById('lb-months');
+  const confirmBody = document.getElementById('lb-confirm-body');
+  const confirmResult = document.getElementById('lb-confirm-result');
+
+  function loadConfirmations() {
+    const months = parseFloat(monthsInput.value) || 3;
+    fetch(`/logbook/confirmations?months=${months}`).then(r => r.json()).then(rows => {
+      if (rows.error) { showResult(confirmResult, false, rows.error); return; }
+      if (!rows.length) {
+        confirmBody.innerHTML = '<tr><td colspan="7" class="lb-empty">No confirmations in this window.</td></tr>';
+        return;
+      }
+      confirmBody.innerHTML = rows.map(r => `
+        <tr>
+          <td>${fmtConfirmedDate(r.confirmed_date)}</td>
+          <td>${badge(r.confirmed_via)}</td>
+          <td>${r.call || ''}</td>
+          <td>${r.dxcc_country || ''}</td>
+          <td>${r.band_tx || ''}</td>
+          <td>${r.mode || ''}</td>
+          <td>${fmtUtc(r.qso_start)}</td>
+        </tr>
+      `).join('');
+    }).catch(e => showResult(confirmResult, false, String(e)));
+  }
+  document.getElementById('lb-confirm-refresh').addEventListener('click', loadConfirmations);
+
+  const checkResult = document.getElementById('lb-check-result');
+  document.getElementById('lb-check-lotw').addEventListener('click', () => {
+    postJson('/logbook/check_lotw', {}).then(d => showResult(checkResult, d.ok, d.message))
+      .catch(e => showResult(checkResult, false, String(e)));
+  });
+  document.getElementById('lb-check-eqsl').addEventListener('click', () => {
+    postJson('/logbook/check_eqsl', {}).then(d => showResult(checkResult, d.ok, d.message))
+      .catch(e => showResult(checkResult, false, String(e)));
+  });
+
+  loadRecent();
+  loadConfirmations();
+})();
+</script>
+{% endblock %}
