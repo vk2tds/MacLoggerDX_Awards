@@ -85,21 +85,42 @@ def _qsl_badge(qsl_received: Optional[str]) -> Optional[str]:
     return None
 
 
+def _first_worked_times() -> tuple:
+    """(dxcc_id -> earliest qso_start ever, (dxcc_id, band_tx) -> earliest
+    qso_start on that band) across the *whole* log -- used to mark a QSO as
+    "new DXCC"/"new band" at the time it happened. Recomputed per call
+    (no caching) -- at this log's scale (~5000 rows) a couple of GROUP BY
+    queries are cheap, and correctness (never going stale) matters more
+    than shaving a few ms, same philosophy as log_status.py's approach."""
+    dxcc_rows = _execute(f"SELECT dxcc_id, MIN(qso_start) FROM {_qso_table} WHERE dxcc_id IS NOT NULL GROUP BY dxcc_id")
+    band_rows = _execute(
+        f"SELECT dxcc_id, band_tx, MIN(qso_start) FROM {_qso_table} "
+        f"WHERE dxcc_id IS NOT NULL AND band_tx IS NOT NULL GROUP BY dxcc_id, band_tx"
+    )
+    first_dxcc = {r[0]: r[1] for r in dxcc_rows}
+    first_band = {(r[0], r[1]): r[2] for r in band_rows}
+    return first_dxcc, first_band
+
+
 def _qsos_in_range(start_epoch: float, end_epoch: float, limit: int) -> list:
     rows = _execute(
         f"SELECT call, band_tx, band_rx, mode, qso_start, qso_done, grid, dxcc_country, "
-        f"qsl_received, rst_sent, rst_received FROM {_qso_table} "
+        f"qsl_received, rst_sent, rst_received, dxcc_id FROM {_qso_table} "
         f"WHERE qso_start > ? AND qso_start <= ? ORDER BY qso_start DESC LIMIT ?",
         (start_epoch, end_epoch, limit),
     )
-    return [
-        {
-            "call": r[0], "band_tx": r[1], "band_rx": r[2], "mode": r[3],
-            "qso_start": r[4], "qso_done": r[5], "grid": r[6], "dxcc_country": r[7],
+    first_dxcc, first_band = _first_worked_times()
+    result = []
+    for r in rows:
+        dxcc_id, band_tx, qso_start = r[11], r[1], r[4]
+        result.append({
+            "call": r[0], "band_tx": band_tx, "band_rx": r[2], "mode": r[3],
+            "qso_start": qso_start, "qso_done": r[5], "grid": r[6], "dxcc_country": r[7],
             "qsl_badge": _qsl_badge(r[8]), "rst_sent": r[9], "rst_received": r[10],
-        }
-        for r in rows
-    ]
+            "is_new_dxcc": dxcc_id is not None and first_dxcc.get(dxcc_id) == qso_start,
+            "is_new_band": dxcc_id is not None and band_tx is not None and first_band.get((dxcc_id, band_tx)) == qso_start,
+        })
+    return result
 
 
 def recent_qsos(hours: float = 36, limit: int = 200) -> list:

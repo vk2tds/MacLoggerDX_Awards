@@ -32,11 +32,31 @@
   .badge-Card { background: #2f6fed; color: #fff; }
   .badge-eQSL { background: #ddd; color: #555; }
 
+  .tag { display: inline-block; border-radius: 3px; padding: 0 0.3rem; font-size: 0.68rem; margin-left: 0.25rem; }
+  .tag-new { background: #ffc107; color: #333; }
+
   .action-result { font-size: 0.78rem; margin-left: 0.5rem; }
   .action-result.ok { color: #2e7d32; }
   .action-result.err { color: #c62828; }
   .lb-empty { color: #888; font-size: 0.85rem; }
+
+  .call-link { text-decoration: underline dotted; cursor: pointer; }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
+  .modal-box { background: #fff; border-radius: 6px; padding: 1rem 1.25rem; width: min(560px, 92vw); max-height: 85vh; overflow-y: auto; box-shadow: 0 8px 30px rgba(0,0,0,0.3); color: #111; }
+  .modal-box h3 { margin: 0 0 0.3rem; }
+  .history-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.4rem; font-size: 0.82rem; margin: 0.6rem 0; }
+  .history-summary div { background: #f4f4f4; border-radius: 4px; padding: 0.35rem 0.5rem; }
+  .history-lines { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; max-height: 40vh; overflow-y: auto; background: #fafafa; padding: 0.5rem; border-radius: 4px; }
+  .history-lines div.tx { color: #1565c0; }
 </style>
+
+<div class="lb-shell">
+  <h3 style="margin: 0 0 0.5rem;">Search</h3>
+  <div class="lb-row">
+    <input type="text" id="lb-search-call" placeholder="Callsign" style="text-transform:uppercase;">
+    <button id="lb-search-btn">Search</button>
+  </div>
+</div>
 
 <div class="lb-shell">
   <h3 style="margin: 0 0 0.5rem;">Recent QSOs</h3>
@@ -97,6 +117,17 @@
   </div>
 </div>
 
+<div id="history-overlay" class="modal-overlay" style="display:none;">
+  <div class="modal-box">
+    <h3 id="history-title">Callsign</h3>
+    <div id="history-summary" class="history-summary"></div>
+    <div id="history-lines" class="history-lines"></div>
+    <div style="margin-top:0.6rem;">
+      <button id="history-close">Close</button>
+    </div>
+  </div>
+</div>
+
 <script>
 (function () {
   function postJson(url, body) {
@@ -126,12 +157,28 @@
     return label ? `<span class="badge badge-${label}">${label}</span>` : '';
   }
 
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function callCell(call) {
+    if (!call) return '';
+    return `<span class="call-link" title="Click for callsign history">${escapeHtml(call)}</span>`;
+  }
+
   // -- Recent QSOs --
   const hoursInput = document.getElementById('lb-hours');
   const recentBody = document.getElementById('lb-recent-body');
   const recentResult = document.getElementById('lb-recent-result');
   const yearSelect = document.getElementById('lb-year');
   const monthRow = document.getElementById('lb-month-row');
+
+  function newTags(r) {
+    const tags = [];
+    if (r.is_new_dxcc) tags.push('<span class="tag tag-new">NEW DXCC</span>');
+    else if (r.is_new_band) tags.push('<span class="tag tag-new">NEW BAND</span>');
+    return tags.join('');
+  }
 
   function renderRecentRows(rows) {
     if (!rows.length) {
@@ -143,15 +190,62 @@
         <td>${fmtUtc(r.qso_start)}</td>
         <td>${r.band_tx || r.band_rx || ''}</td>
         <td>${r.mode || ''}</td>
-        <td>${r.call || ''}</td>
-        <td>${r.dxcc_country || ''}</td>
+        <td>${callCell(r.call)}</td>
+        <td>${r.dxcc_country || ''}${newTags(r)}</td>
         <td>${r.grid || ''}</td>
         <td>${r.rst_sent || ''}</td>
         <td>${r.rst_received || ''}</td>
         <td>${badge(r.qsl_badge)}</td>
       </tr>
     `).join('');
+    recentBody.querySelectorAll('.call-link').forEach(el => {
+      el.addEventListener('click', () => openHistory(el.textContent));
+    });
   }
+
+  // -- Callsign search: reuses the same /live/callsign/<call> history
+  // lookup and modal already used by Live Monitor/Remote (worked/confirmed
+  // summary + every ALL.TXT exchange line for that call), rather than
+  // building a second history view from scratch.
+  const historyOverlay = document.getElementById('history-overlay');
+  const historyTitle = document.getElementById('history-title');
+  const historySummary = document.getElementById('history-summary');
+  const historyLines = document.getElementById('history-lines');
+
+  function openHistory(call) {
+    historyTitle.textContent = call;
+    historySummary.innerHTML = 'Loading…';
+    historyLines.innerHTML = '';
+    historyOverlay.style.display = 'flex';
+    fetch('/live/callsign/' + encodeURIComponent(call)).then(r => r.json()).then(data => {
+      if (data.error) { historySummary.innerHTML = data.error; return; }
+      const worked = data.worked_before ? `Worked (${data.qso_count} QSO${data.qso_count === 1 ? '' : 's'})` : 'Never worked';
+      const confirmed = data.confirmed_lotw_ever ? 'Confirmed (LoTW)' : (data.confirmed_ever ? 'Confirmed (eQSL/card)' : 'Not confirmed');
+      historySummary.innerHTML = `
+        <div>${worked}</div>
+        <div>${confirmed}</div>
+        <div>${data.dxcc_country || 'DXCC unknown'}</div>
+        <div>${(data.grids_worked || []).join(', ') || 'No grids on file'}</div>
+      `;
+      if (!data.exchange_lines.length) {
+        historyLines.innerHTML = '<em>No ALL.TXT exchange history found for this call.</em>';
+        return;
+      }
+      historyLines.innerHTML = data.exchange_lines.map(l =>
+        `<div class="${l.rxtx === 'Tx' ? 'tx' : ''}">${escapeHtml(l.raw)}</div>`
+      ).join('');
+    }).catch(e => { historySummary.innerHTML = String(e); });
+  }
+  document.getElementById('history-close').addEventListener('click', () => { historyOverlay.style.display = 'none'; });
+
+  const searchInput = document.getElementById('lb-search-call');
+  const searchBtn = document.getElementById('lb-search-btn');
+  function doSearch() {
+    const call = searchInput.value.trim();
+    if (call) openHistory(call);
+  }
+  searchBtn.addEventListener('click', doSearch);
+  searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(); });
 
   function clearMonthSelection() {
     monthRow.querySelectorAll('button').forEach(b => b.classList.remove('current'));
