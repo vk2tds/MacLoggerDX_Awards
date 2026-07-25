@@ -180,7 +180,11 @@
   }
 
   function loadMonth(monthBtn) {
-    if (liveBox.checked) { liveBox.checked = false; liveBox.dispatchEvent(new Event('change')); }
+    // Turn Live off without going through its full "change" handling --
+    // that would call loadRecent() as part of returning to the recent
+    // view, racing with (and getting overwritten by, but wastefully) the
+    // month fetch below. disconnectLive() is just the websocket teardown.
+    if (liveBox.checked) { liveBox.checked = false; disconnectLive(); }
     clearMonthSelection();
     monthBtn.classList.add('current');
     const year = parseInt(yearSelect.value, 10);
@@ -207,9 +211,25 @@
   // there's nothing to incrementally splice in; a plain refetch is both
   // simpler and correct. Small delay since MacLoggerDX ingests the same
   // UDP broadcast independently and needs a moment to write its own row.
+  //
+  // Both directions of the toggle need to actively resync the table, not
+  // just start/stop listening -- otherwise "going back into non-live mode"
+  // (or back into it) leaves whatever was last on screen (e.g. a browsed
+  // history month, or a stale live snapshot) sitting there looking current
+  // when it isn't. loadRecent() already clears any month selection, so
+  // reusing it here also cleanly exits history-browsing on either edge.
   const liveBox = document.getElementById('lb-live');
   const liveStatus = document.getElementById('lb-live-status');
   let liveWs = null;
+  let liveRefreshTimer = null;
+
+  function disconnectLive() {
+    if (liveRefreshTimer !== null) { clearTimeout(liveRefreshTimer); liveRefreshTimer = null; }
+    const ws = liveWs;
+    liveWs = null;
+    if (ws) ws.close();
+    liveStatus.textContent = '';
+  }
 
   function connectLive() {
     const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
@@ -225,19 +245,21 @@
     ws.onmessage = (msg) => {
       let ev;
       try { ev = JSON.parse(msg.data); } catch (e) { return; }
-      if (ev.kind === 'qso_logged') setTimeout(loadRecent, 1500);
+      if (ev.kind === 'qso_logged') {
+        if (liveRefreshTimer !== null) clearTimeout(liveRefreshTimer);
+        liveRefreshTimer = setTimeout(() => { liveRefreshTimer = null; loadRecent(); }, 1500);
+      }
     };
   }
 
   liveBox.addEventListener('change', () => {
     if (liveBox.checked) {
       liveStatus.textContent = 'connecting…';
+      loadRecent(); // resync to the current recent view, exiting any history month
       connectLive();
     } else {
-      const ws = liveWs;
-      liveWs = null;
-      if (ws) ws.close();
-      liveStatus.textContent = '';
+      disconnectLive();
+      loadRecent(); // land on a real non-live snapshot, not a frozen last-live-update
     }
   });
 

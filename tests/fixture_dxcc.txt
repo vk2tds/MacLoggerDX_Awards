@@ -18,6 +18,8 @@ Notes:
     9M2,4(8)           West Malaysia                      AS    54    28    299
     9M6,8(8)           East Malaysia                      OC    54    28    046
     YN,H6-7,HT#        Nicaragua                          NA    11    07    086
+    UA-UI1-7,RA-RZ     European Russia                    EU    (E)   16    054
+    UA-UI8-0,RA-RZ     Asiatic Russia                     AS    (F)   (G)   015
 
     NOTES:
     1    Unofficial prefix.

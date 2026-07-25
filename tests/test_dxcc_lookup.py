@@ -40,7 +40,7 @@ def test_expand_digit_prefixed_range():
 
 def test_resolver_loads_fixture():
     r = DxccResolver(FIXTURE)
-    assert len(r.entities) == 9
+    assert len(r.entities) == 11
 
 
 def test_lookup_japan_digit_prefixed_range_not_nicaragua():
@@ -110,3 +110,20 @@ def test_lookup_empty_input():
     r = DxccResolver(FIXTURE)
     assert r.lookup("") is None
     assert r.lookup(None) is None
+
+
+def test_lookup_russia_splits_by_call_area_digit():
+    # Regression: European Russia and Asiatic Russia both list the exact
+    # same "RA-RZ" range (and, once expanded, the same bare "UA"/"UI"
+    # literals) -- the generic literal/range rules can't tell them apart,
+    # so European always won ties. Bare "R"+digit calls (R7DX) didn't
+    # resolve at all under the generic rules either.
+    r = DxccResolver(FIXTURE)
+    european = ("R1ABC", "R7DX", "RA3ABC", "UA3ABC", "UI1ABC")
+    asiatic = ("R8ABC", "R9ABC", "R0ABC", "RA9ABC", "RZ0ABC", "UA9ABC", "UI8ABC")
+    for call in european:
+        ent = r.lookup(call)
+        assert ent is not None and ent.name == "European Russia", f"{call} -> {ent}"
+    for call in asiatic:
+        ent = r.lookup(call)
+        assert ent is not None and ent.name == "Asiatic Russia", f"{call} -> {ent}"

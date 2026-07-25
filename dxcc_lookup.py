@@ -46,6 +46,22 @@ _DATA_LINE_RE = re.compile(
 
 DEFAULT_DXCC_URI = "http://www.arrl.org/files/file/DXCC/2019_Current_Deleted(3).txt"
 
+# European Russia and Asiatic Russia are a genuinely irregular case the
+# generic literal/range model below can't express: both entities' prefix
+# fields are "UA-UI1-7,RA-RZ" / "UA-UI8-0,RA-RZ" -- the SAME "RA-RZ" range
+# (and, once expanded, the same bare "UA"/"UI" literals too), with only a
+# trailing call-area digit (1-7 = European, 8/9/0 = Asiatic) actually
+# distinguishing them. Confirmed live (2026-07-25): with only the generic
+# rules, European Russia's identical range always won ties (first-loaded-
+# wins), so e.g. RA9ABC/UA9ABC/RZ0ABC -- all genuinely Asiatic by call area
+# -- silently resolved to European Russia, and bare "R"+digit calls like
+# R7DX didn't resolve at all (no token covers that shorter form). Handled
+# as its own special case in DxccResolver rather than stretched to fit
+# PrefixRule -- confirmed no other entity in dxcc.txt uses R/UA/UI as a
+# prefix root, so this can't misfire on anything else.
+_RUSSIA_CALL_AREA_RE = re.compile(r"^(?:UA|UI|R[A-Z]?)([0-9])")
+_RUSSIA_EUROPEAN_AREAS = set("1234567")
+
 
 @dataclasses.dataclass
 class Entity:
@@ -186,8 +202,18 @@ def load_entities(dxcc_file: str, dxcc_uri: str = DEFAULT_DXCC_URI) -> list:
 class DxccResolver:
     def __init__(self, dxcc_file: str, dxcc_uri: str = DEFAULT_DXCC_URI):
         self.entities = load_entities(dxcc_file, dxcc_uri)
+
+        # See _RUSSIA_CALL_AREA_RE above -- these two get resolved by call-area
+        # digit in lookup(), not the generic rules, so skip their (misleading,
+        # colliding) tokens below rather than leaving dead/wrong rules around.
+        self._russia_european = next((e for e in self.entities if e.name == "European Russia"), None)
+        self._russia_asiatic = next((e for e in self.entities if e.name == "Asiatic Russia"), None)
+        russia_entities = {id(e) for e in (self._russia_european, self._russia_asiatic) if e is not None}
+
         self.rules: list = []
         for ent in self.entities:
+            if id(ent) in russia_entities:
+                continue
             for tok in _expand_prefix_field(ent.prefix_field):
                 if tok[0] == "literal":
                     self.rules.append(PrefixRule(entity=ent, literal=tok[1]))
@@ -208,6 +234,12 @@ class DxccResolver:
         # generally the FIRST slash-part if it itself looks like a prefix
         # override, otherwise the base call.
         base = call.split("/")[0]
+
+        if self._russia_european and self._russia_asiatic:
+            m = _RUSSIA_CALL_AREA_RE.match(base)
+            if m:
+                area = m.group(1)
+                return self._russia_european if area in _RUSSIA_EUROPEAN_AREAS else self._russia_asiatic
 
         best = None
         best_len = -1
