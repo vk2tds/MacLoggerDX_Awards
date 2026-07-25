@@ -18,6 +18,7 @@
 
 import datetime
 import logging
+import os
 
 from flask import Flask, render_template, redirect, url_for, flash
 from flask_sock import Sock
@@ -129,4 +130,4 @@ def refresh_view():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', debug=True, port=5050, threaded=True)
+    app.run(host='0.0.0.0', debug=True, port=int(os.environ.get('PORT', 5050)), threaded=True)
