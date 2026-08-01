@@ -370,6 +370,7 @@ class LiveMonitor:
             "time_ms": fields.get("time_ms"),
             "snr": fields.get("snr"),
             "delta_freq_hz": fields.get("delta_freq_hz"),
+            "dial_frequency_hz": self.wsjtx_status.get("dial_frequency_hz"),
             "mode": mode,
             "band": band,
             "message": text,

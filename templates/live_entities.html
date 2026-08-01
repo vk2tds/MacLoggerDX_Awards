@@ -6,23 +6,37 @@
   Same live decode feed as <a href="{{ url_for('live.live_view') }}">Live Monitor</a>, grouped by DXCC
   entity instead of shown as a flat log -- most recently-heard entity on top, with up to 3 of its most
   recently-heard distinct callsigns underneath. Colors match Live Monitor's worked/confirmed/none
-  scheme, scoped to band.
+  scheme, scoped to band. Each station's own band and radio frequency (at the time it was heard) is
+  shown next to it. The six boxes after each callsign show how often it's been decoded in
+  <15m / 15-30m / 30-60m / 1-2h / 2-3h / 3-6h windows, normalized to a common per-15-minute rate so
+  the boxes are directly comparable despite their different widths -- hover a box for the exact count.
+  Filter to Everything / Current band / Current band + frequency; Clear removes only what the current
+  filter shows -- WSJT-X's own Erase doesn't touch this screen, since this is meant to keep a longer
+  history than the live decode window does.
 </p>
 
 <style>
-  .dx-toolbar { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.75rem; font-size: 0.9rem; }
+  .dx-toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: center; margin-bottom: 0.75rem; font-size: 0.9rem; }
   #dx-conn-dot { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 50%; background: #999; }
   #dx-conn-dot.up { background: #2e7d32; }
   #dx-conn-dot.down { background: #c62828; }
 
-  .dx-group { border: 1px solid #ccc; border-radius: 6px; padding: 0.5rem 0.85rem; margin-bottom: 0.5rem; max-width: 42em; }
-  .dx-header { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; font-weight: 600; font-size: 0.95rem; margin-bottom: 0.3rem; border-bottom: 1px solid #eee; padding-bottom: 0.25rem; }
-  .dx-band { font-size: 0.78rem; color: #666; font-weight: 400; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
-  .dx-call-row { display: flex; gap: 1.2rem; font-size: 0.85rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; padding: 0.1rem 0; }
+  .dx-filter-group { display: flex; gap: 0.75rem; font-size: 0.85rem; }
+  .dx-filter-group label { display: flex; align-items: center; gap: 0.25rem; white-space: nowrap; }
+  #dx-current { margin-left: auto; font-size: 0.78rem; color: #666; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+  #dx-clear-btn { font-size: 0.8rem; padding: 0.25rem 0.7rem; }
+
+  .dx-group { border: 1px solid #ccc; border-radius: 6px; padding: 0.5rem 0.85rem; margin-bottom: 0.5rem; max-width: 46em; }
+  .dx-header { font-weight: 600; font-size: 0.95rem; margin-bottom: 0.3rem; border-bottom: 1px solid #eee; padding-bottom: 0.25rem; }
+  .dx-call-row { display: flex; align-items: center; gap: 1rem; font-size: 0.85rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; padding: 0.1rem 0; }
   .dx-call { min-width: 8em; }
   .dx-snr { min-width: 4em; color: #555; }
   .dx-time { color: #888; }
+  .dx-freq { min-width: 8em; color: #555; }
   .dx-empty { color: #888; font-size: 0.85rem; }
+
+  .dx-activity { display: flex; gap: 2px; margin-left: auto; }
+  .dx-box { width: 11px; height: 11px; border-radius: 2px; border: 1px solid rgba(0,0,0,0.15); }
 
   .status-confirmed { color: #2e7d32; font-weight: 600; }
   .status-worked { color: #e67e22; font-weight: 600; }
@@ -32,6 +46,13 @@
 
 <div class="dx-toolbar">
   <span id="dx-conn-dot"></span> <span id="dx-conn-text">connecting…</span>
+  <span class="dx-filter-group">
+    <label><input type="radio" name="dx-filter" value="all" checked> Everything</label>
+    <label><input type="radio" name="dx-filter" value="band"> Current band</label>
+    <label><input type="radio" name="dx-filter" value="band_freq"> Current band + frequency</label>
+  </span>
+  <button id="dx-clear-btn" type="button">Clear</button>
+  <span id="dx-current"></span>
 </div>
 
 <div id="dx-entities"></div>
@@ -41,9 +62,84 @@
   const dot = document.getElementById('dx-conn-dot');
   const connText = document.getElementById('dx-conn-text');
   const container = document.getElementById('dx-entities');
+  const currentReadout = document.getElementById('dx-current');
+  const filterRadios = document.querySelectorAll('input[name="dx-filter"]');
+  const clearBtn = document.getElementById('dx-clear-btn');
 
-  // dxcc_name -> { band, delta_freq_hz, entity_status, lastTime, lastSeenWallClock, calls: Map<call, {snr, time_ms, call_status}> }
+  // dxcc_name -> { entity_status, lastTime, lastSeenWallClock, calls: Map<call, {snr, time_ms, call_status, band, dial_frequency_hz, delta_freq_hz, decodeTimes}> }
   const entities = new Map();
+
+  // Same band table/convention as the Remote tab's band-button highlighting,
+  // used here purely to know what "current band" means for the filter modes
+  // -- the server's own freq_to_band() (live_monitor.py) already stamps a
+  // per-decode "band" field, but Status broadcasts don't carry one, so the
+  // current band has to be derived client-side from dial_frequency_hz.
+  const BAND_TABLE = [
+    [1.8, 2.0, '160M'], [3.5, 4.0, '80M'], [5.3, 5.4, '60M'], [7.0, 7.3, '40M'],
+    [10.1, 10.15, '30M'], [14.0, 14.35, '20M'], [18.068, 18.168, '17M'],
+    [21.0, 21.45, '15M'], [24.89, 24.99, '12M'], [28.0, 29.7, '10M'],
+    [50.0, 54.0, '6M'], [70.0, 70.5, '4M'], [144.0, 148.0, '2M'],
+  ];
+  function freqToBand(hz) {
+    if (!hz) return null;
+    const mhz = hz / 1e6;
+    const match = BAND_TABLE.find(([lo, hi]) => mhz >= lo && mhz <= hi);
+    return match ? match[2] : null;
+  }
+
+  let currentDialHz = null;
+  let currentBand = null;
+  function applyStatus(ev) {
+    if (ev.dial_frequency_hz) {
+      currentDialHz = ev.dial_frequency_hz;
+      currentBand = freqToBand(currentDialHz);
+    }
+    currentReadout.textContent = currentBand
+      ? `Current: ${currentBand} ${(currentDialHz / 1e6).toFixed(6)}` : '';
+  }
+
+  let filterMode = localStorage.getItem('dx_filter_mode') || 'all';
+  filterRadios.forEach(r => {
+    r.checked = (r.value === filterMode);
+    r.addEventListener('change', () => {
+      if (r.checked) { filterMode = r.value; localStorage.setItem('dx_filter_mode', filterMode); renderAll(); }
+    });
+  });
+
+  // Band/band+frequency filtering is per-station (each call carries its own
+  // last-heard band/frequency), not per-entity -- a DXCC entity can have
+  // stations heard on different bands over its 6h lifetime.
+  function passesFilter(info) {
+    if (filterMode === 'all') return true;
+    if (!currentBand || info.band !== currentBand) return false;
+    if (filterMode === 'band') return true;
+    return info.dial_frequency_hz != null && currentDialHz != null && info.dial_frequency_hz === currentDialHz;
+  }
+
+  // "Clear" only removes what the current filter shows -- e.g. in "Current
+  // band" mode it clears just that band's stations, leaving others intact.
+  // Deliberately NOT wired to WSJT-X's own Erase/'clear' broadcast (see
+  // connect() below) -- this screen is meant to hold a longer history than
+  // the live decode window, so an Erase over there shouldn't wipe it here.
+  function clearByFilter() {
+    if (filterMode === 'all') {
+      entities.clear();
+      renderAll();
+      return;
+    }
+    const emptyEntities = [];
+    for (const [name, group] of entities) {
+      const toDelete = [];
+      for (const [call, info] of group.calls) {
+        if (passesFilter(info)) toDelete.push(call);
+      }
+      toDelete.forEach(call => group.calls.delete(call));
+      if (group.calls.size === 0) emptyEntities.push(name);
+    }
+    emptyEntities.forEach(name => entities.delete(name));
+    renderAll();
+  }
+  clearBtn.addEventListener('click', clearByFilter);
 
   // "Time out after six hours" -- WSJT-X's own time_ms field is only
   // ms-since-midnight-UTC (see fmtTime), not a real timestamp, so it can't
@@ -51,6 +147,57 @@
   // boundary. lastSeenWallClock is a real Date.now() captured whenever a
   // live decode updates a group, used only for this expiry check.
   const TIMEOUT_MS = 6 * 60 * 60 * 1000;
+
+  // Six activity-box time windows (per callsign, based on decode wall-clock
+  // times -- how often heard, not how often worked). Widths differ, so raw
+  // counts aren't comparable across boxes -- normalized() below expresses
+  // each as an equivalent count-per-15-minutes so all six sit on one scale
+  // (user's own example: 1 decode in 15 min == 12 decodes in 3 hours).
+  const ACTIVITY_BUCKETS = [
+    { label: '<15m', minMs: 0, maxMs: 15 * 60 * 1000, widthMin: 15 },
+    { label: '15-30m', minMs: 15 * 60 * 1000, maxMs: 30 * 60 * 1000, widthMin: 15 },
+    { label: '30-60m', minMs: 30 * 60 * 1000, maxMs: 60 * 60 * 1000, widthMin: 30 },
+    { label: '1-2h', minMs: 60 * 60 * 1000, maxMs: 120 * 60 * 1000, widthMin: 60 },
+    { label: '2-3h', minMs: 120 * 60 * 1000, maxMs: 180 * 60 * 1000, widthMin: 60 },
+    { label: '3-6h', minMs: 180 * 60 * 1000, maxMs: 360 * 60 * 1000, widthMin: 180 },
+  ];
+
+  function computeActivityBoxes(decodeTimes, now) {
+    const counts = ACTIVITY_BUCKETS.map(() => 0);
+    decodeTimes.forEach(t => {
+      const age = now - t;
+      for (let i = 0; i < ACTIVITY_BUCKETS.length; i++) {
+        const b = ACTIVITY_BUCKETS[i];
+        if (age >= b.minMs && age < b.maxMs) { counts[i]++; break; }
+      }
+    });
+    return ACTIVITY_BUCKETS.map((b, i) => ({
+      label: b.label, count: counts[i], rate: counts[i] * 15 / b.widthMin,
+    }));
+  }
+
+  // Color ramp for the normalized rate -- grey (none heard) up through
+  // blue/amber/red. MAX_RATE is where the ramp saturates (tune against real
+  // observed activity levels); it's an equivalent-count-per-15-minutes, not
+  // a raw count, so it applies the same to all six boxes regardless of
+  // their actual width.
+  const ACTIVITY_MAX_RATE = 8;
+  function activityColor(rate) {
+    if (rate <= 0) return '#e2e2e2';
+    const t = Math.max(0, Math.min(1, rate / ACTIVITY_MAX_RATE));
+    const stops = [
+      [0, [191, 219, 254]], [0.4, [59, 130, 246]], [0.7, [245, 158, 11]], [1, [211, 47, 47]],
+    ];
+    for (let i = 0; i < stops.length - 1; i++) {
+      const [t0, c0] = stops[i], [t1, c1] = stops[i + 1];
+      if (t <= t1 || i === stops.length - 2) {
+        const f = Math.max(0, Math.min(1, (t - t0) / (t1 - t0 || 1)));
+        const c = c0.map((v, k) => Math.round(v + (c1[k] - v) * f));
+        return `rgb(${c[0]},${c[1]},${c[2]})`;
+      }
+    }
+    return 'rgb(211,47,47)';
+  }
 
   function escapeHtml(s) {
     return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -76,12 +223,20 @@
       group = { calls: new Map() };
       entities.set(ev.dxcc_name, group);
     }
-    group.band = ev.band;
-    group.delta_freq_hz = ev.delta_freq_hz;
     group.entity_status = ev.entity_status;
     group.lastTime = ev.time_ms;
     group.lastSeenWallClock = Date.now();
-    group.calls.set(ev.call, { snr: ev.snr, time_ms: ev.time_ms, call_status: ev.call_status });
+    const now = Date.now();
+    const prevInfo = group.calls.get(ev.call);
+    const decodeTimes = (prevInfo && prevInfo.decodeTimes) || [];
+    decodeTimes.push(now);
+    // Prune this call's own history to the same 6h window as the entity
+    // timeout, so it doesn't grow unbounded for a call heard continuously.
+    while (decodeTimes.length && now - decodeTimes[0] > TIMEOUT_MS) decodeTimes.shift();
+    group.calls.set(ev.call, {
+      snr: ev.snr, time_ms: ev.time_ms, call_status: ev.call_status, decodeTimes,
+      band: ev.band, dial_frequency_hz: ev.dial_frequency_hz,
+    });
     if (group.calls.size > 3) {
       let oldestCall = null, oldestTime = Infinity;
       for (const [call, info] of group.calls) {
@@ -96,6 +251,16 @@
     for (const [name, group] of entities) {
       if (now - (group.lastSeenWallClock ?? now) > TIMEOUT_MS) entities.delete(name);
     }
+  }
+
+  function freqLabel(info) {
+    if (!info.band) return '';
+    // Just the dial frequency the radio was tuned to -- not each decode's
+    // own audio-passband offset added in (that gave a different, noisier
+    // number per station, e.g. 21.075340, instead of the one real dial
+    // setting, e.g. 21.074, that they were all actually heard on).
+    const mhz = info.dial_frequency_hz != null ? (info.dial_frequency_hz / 1e6).toFixed(3) : '';
+    return mhz ? `${info.band} ${mhz}` : info.band;
   }
 
   function renderAll() {
@@ -113,26 +278,41 @@
       if (aConfirmed !== bConfirmed) return aConfirmed ? 1 : -1;
       return (b[1].lastTime ?? 0) - (a[1].lastTime ?? 0);
     });
-    container.innerHTML = sorted.map(([name, group]) => {
-      const calls = Array.from(group.calls.entries()).sort((a, b) => (b[1].time_ms ?? 0) - (a[1].time_ms ?? 0));
-      const freqBit = (group.delta_freq_hz !== undefined && group.delta_freq_hz !== null) ? ` @ ${group.delta_freq_hz} Hz` : '';
-      const callRows = calls.map(([call, info]) => `
+    const now = Date.now();
+    const groupsHtml = sorted.map(([name, group]) => {
+      // Filtering is per-station (each call carries its own last-heard
+      // band/frequency) -- an entity with no calls passing the filter is
+      // omitted entirely rather than shown with an empty call list.
+      const calls = Array.from(group.calls.entries())
+        .filter(([, info]) => passesFilter(info))
+        .sort((a, b) => (b[1].time_ms ?? 0) - (a[1].time_ms ?? 0));
+      if (calls.length === 0) return '';
+      const callRows = calls.map(([call, info]) => {
+        const boxes = computeActivityBoxes(info.decodeTimes || [], now).map(b => `
+          <span class="dx-box" style="background:${activityColor(b.rate)}" title="${b.label}: ${b.count} decode${b.count === 1 ? '' : 's'} (${b.rate.toFixed(1)}/15min normalized)"></span>
+        `).join('');
+        return `
         <div class="dx-call-row">
           <span class="dx-call ${statusClass(info.call_status && info.call_status.band)}">${escapeHtml(call)}</span>
           <span class="dx-snr">${info.snr ?? ''} dB</span>
           <span class="dx-time">${fmtTime(info.time_ms)}</span>
+          <span class="dx-freq">${freqLabel(info)}</span>
+          <span class="dx-activity">${boxes}</span>
         </div>
-      `).join('');
+      `;
+      }).join('');
       return `
         <div class="dx-group">
           <div class="dx-header">
             <span class="${statusClass(group.entity_status && group.entity_status.band)}">${escapeHtml(name)}</span>
-            <span class="dx-band">${group.band || ''}${freqBit}</span>
           </div>
           ${callRows}
         </div>
       `;
-    }).join('');
+    }).filter(html => html !== '');
+    container.innerHTML = groupsHtml.length
+      ? groupsHtml.join('')
+      : `<p class="dx-empty">Nothing matches this filter${currentBand ? '' : ' (waiting for WSJT-X status to know the current band)'}.</p>`;
   }
 
   function connect() {
@@ -144,10 +324,17 @@
     ws.onmessage = (msg) => {
       let ev;
       try { ev = JSON.parse(msg.data); } catch (e) { return; }
+      // Deliberately NOT listening for 'clear' (WSJT-X's own Erase) here --
+      // see clearByFilter() above for why. Only the page's own Clear button
+      // removes anything from this screen.
       if (ev.kind === 'decode') { handleDecode(ev); renderAll(); }
-      else if (ev.kind === 'clear') { entities.clear(); renderAll(); }
+      else if (ev.kind === 'status') { applyStatus(ev); renderAll(); }
     };
   }
+
+  fetch('/live/config').then(r => r.json()).then(data => {
+    if (data.wsjtx_status && Object.keys(data.wsjtx_status).length) { applyStatus(data.wsjtx_status); renderAll(); }
+  }).catch(() => {});
 
   fetch('/live/history').then(r => r.json()).then(events => {
     events.forEach(ev => { if (ev.kind === 'decode') handleDecode(ev); });

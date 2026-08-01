@@ -36,7 +36,7 @@ import wsjtx_remote
 
 log = logging.getLogger("app." + __name__)
 
-APP_VERSION = "2026.07.14"
+APP_VERSION = "2026.08.02"
 
 app = Flask(__name__)
 app.secret_key = 'macloggerdx-awards'
