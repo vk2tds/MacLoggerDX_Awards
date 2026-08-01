@@ -59,13 +59,14 @@
   .rxfreq-controls input { width: 3.5em; }
 
   .waterfall-shell { overflow-x: auto; background: #07143a; border: 1px solid #b8b8b8; border-radius: 4px; }
-  #waterfall-canvas { display: block; }
+  #waterfall-canvas, #spectrum-canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; }
   .waterfall-caption { font-size: 0.7rem; color: #888; margin: 0.25rem 0 0.75rem; }
-  .waterfall-toolbar { display: flex; align-items: center; gap: 1rem; font-size: 0.78rem; margin-bottom: 0.3rem; }
+  .waterfall-toolbar { display: flex; align-items: center; gap: 1rem; font-size: 0.78rem; margin-bottom: 0.3rem; flex-wrap: wrap; }
   .waterfall-toolbar label { display: flex; align-items: center; gap: 0.3rem; }
   .waterfall-toolbar input[type=number] { width: 3.5em; }
   .waterfall-pop-link { color: #1565c0; text-decoration: none; margin-left: auto; }
   .waterfall-pop-link:hover { text-decoration: underline; }
+  .spectrum-ruler { display: flex; justify-content: space-between; font-size: 0.65rem; color: #9db3e0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; padding: 0.1rem 0.2rem; background: #1a2a5a; }
 
   .wsjtx-body { display: flex; gap: 0.75rem; align-items: stretch; flex-wrap: wrap; }
 
@@ -141,15 +142,24 @@
 
   <div id="waterfall-block">
     <div class="waterfall-toolbar">
-      <label>Rows <input id="wf-rows" type="number" min="2" max="120" value="4"></label>
+      <label><input type="radio" name="wf-mode" value="decode" checked> Decode-based</label>
+      <label><input type="radio" name="wf-mode" value="spectrum_4hz"> Spectrum 4Hz</label>
+      <label><input type="radio" name="wf-mode" value="spectrum_1hz"> Spectrum 1Hz avg</label>
+      <label id="wf-rows-label">Rows <input id="wf-rows" type="number" min="2" max="120" value="4"></label>
+      <label id="spec-seconds-label" style="display:none;">Seconds <input id="spec-seconds" type="number" min="2" max="120" value="20"></label>
       <a href="{{ url_for('remote.remote_waterfall_view') }}" target="_blank" class="waterfall-pop-link">Open in own tab &#8599;</a>
     </div>
-    <div class="waterfall-shell">
+    <p class="proc-hint" id="spectrum-warn" style="display:none; color:#b45309;"></p>
+    <div class="waterfall-shell" id="decode-shell">
       <canvas id="waterfall-canvas" width="760" height="368"></canvas>
     </div>
+    <div class="waterfall-shell" id="spectrum-shell" style="display:none;">
+      <div class="spectrum-ruler"><span>200</span><span>760</span><span>1320</span><span>1880</span><span>2440</span><span>3000 Hz</span></div>
+      <canvas id="spectrum-canvas" width="700" height="220"></canvas>
+    </div>
     <p class="waterfall-caption">
-      Decode-based waterfall -- WSJT-X's UDP API has no spectrum/noise-floor data, so this shows only signals it
-      actually decoded (colored by SNR), one row per decode cycle. Not a true spectrogram.
+      Decode-based waterfall shows only signals actually decoded (colored by SNR), one row per decode cycle --
+      not a true spectrogram. Spectrum modes are a real FFT of WSJT-X's own audio input (200 Hz-3 kHz, 4 Hz/bin).
     </p>
   </div>
 
@@ -298,6 +308,7 @@
 </div>
 
 <script src="{{ url_for('static', filename='waterfall.js') }}"></script>
+<script src="{{ url_for('static', filename='spectrum_waterfall.js') }}"></script>
 <script>
 (function () {
   const dot = document.getElementById('rconn-dot');
@@ -333,6 +344,7 @@
   // (already cycle-quantized) time_ms into rows and plots each decode as an
   // SNR-colored blob at its audio frequency. --
   const wfRowsInput = document.getElementById('wf-rows');
+  const wfRowsLabel = document.getElementById('wf-rows-label');
   const wfShowBox = document.getElementById('wf-show');
   const waterfallBlock = document.getElementById('waterfall-block');
   const savedRows = parseInt(localStorage.getItem('wf_rows'), 10);
@@ -352,6 +364,49 @@
     waterfallBlock.style.display = wfShowBox.checked ? '' : 'none';
     localStorage.setItem('wf_show', wfShowBox.checked ? '1' : '0');
   });
+
+  // -- Spectrum waterfall mode selector (audio_spectrum.py, real FFT of
+  // WSJT-X's own audio input) -- alternative to the decode-based waterfall
+  // above, selected client-side since both spectrum_4hz/spectrum_1hz are
+  // always being broadcast. Separate localStorage key from the standalone
+  // /remote/waterfall tab (wf_mode_standalone) since this panel's mode can
+  // legitimately differ.
+  const decodeShell = document.getElementById('decode-shell');
+  const spectrumShell = document.getElementById('spectrum-shell');
+  const spectrumWarn = document.getElementById('spectrum-warn');
+  const modeRadios = document.querySelectorAll('input[name="wf-mode"]');
+  const spectrum = createSpectrumWaterfall(document.getElementById('spectrum-canvas'));
+  const specSecondsInput = document.getElementById('spec-seconds');
+  const specSecondsLabel = document.getElementById('spec-seconds-label');
+  const savedSeconds = parseInt(localStorage.getItem('spec_seconds_embedded'), 10);
+  specSecondsInput.value = spectrum.setSeconds(savedSeconds || 20);
+  specSecondsInput.addEventListener('change', () => {
+    const n = spectrum.setSeconds(parseInt(specSecondsInput.value, 10));
+    specSecondsInput.value = n;
+    localStorage.setItem('spec_seconds_embedded', String(n));
+  });
+
+  let wfMode = localStorage.getItem('wf_mode_embedded') || 'decode';
+  function applyWfMode() {
+    modeRadios.forEach(r => { r.checked = (r.value === wfMode); });
+    const isSpectrum = wfMode !== 'decode';
+    decodeShell.style.display = isSpectrum ? 'none' : '';
+    spectrumShell.style.display = isSpectrum ? '' : 'none';
+    wfRowsLabel.style.display = isSpectrum ? 'none' : '';
+    specSecondsLabel.style.display = isSpectrum ? '' : 'none';
+    if (isSpectrum) spectrum.setRate(wfMode === 'spectrum_4hz' ? 4 : 1);
+  }
+  modeRadios.forEach(r => r.addEventListener('change', () => {
+    if (r.checked) { wfMode = r.value; localStorage.setItem('wf_mode_embedded', wfMode); applyWfMode(); }
+  }));
+  applyWfMode();
+
+  fetch('/live/spectrum_status').then(r => r.json()).then(s => {
+    if (!s.capturing) {
+      spectrumWarn.textContent = 'Spectrum capture unavailable: ' + (s.error || 'unknown reason');
+      spectrumWarn.style.display = '';
+    }
+  }).catch(() => {});
 
   const BAND_TABLE = [
     [1.8, 2.0, '160'], [3.5, 4.0, '80'], [5.3, 5.4, '60'], [7.0, 7.3, '40'],
@@ -543,6 +598,8 @@
         timeGroups.band.lastTime = timeGroups.rxfreq.lastTime = null;
         timeGroups.band.alt = timeGroups.rxfreq.alt = false;
         wf.clear();
+      } else if (ev.kind === wfMode && (ev.kind === 'spectrum_4hz' || ev.kind === 'spectrum_1hz')) {
+        spectrum.pushRow(ev.bins);
       }
     };
   }

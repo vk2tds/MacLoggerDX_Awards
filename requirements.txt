@@ -8,3 +8,4 @@ pyobjc-framework-Quartz; sys_platform == "darwin"
 # installed separately, e.g. `port install hidapi` or `brew install hidapi`
 # -- pip alone doesn't provide it.
 hid
+sounddevice

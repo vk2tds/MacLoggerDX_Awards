@@ -419,6 +419,14 @@ class LiveMonitor:
         for q in targets:
             q.put(event)
 
+    def broadcast_event(self, event: dict):
+        """Public entry point for other modules to push an event onto this
+        same /live/ws fan-out (e.g. audio_spectrum.py's spectrum rows) --
+        same "reuse the shared transport" precedent as wsjtx_remote.py.
+        Deliberately doesn't touch self.history: that's only for the decode/
+        status/qso_logged events /live/history replays on page load."""
+        self._broadcast(event)
+
     def register_client(self) -> "queue.Queue":
         q: "queue.Queue" = queue.Queue()
         with self._clients_lock:
@@ -515,6 +523,14 @@ def live_entities_view():
     see templates/live_entities.html. No server-side grouping needed since
     every decode event already carries dxcc_name/entity_status/call_status."""
     return render_template("live_entities.html")
+
+
+@live_bp.route("/live/spectrum_status")
+def live_spectrum_status():
+    # Local import to avoid a circular import -- audio_spectrum.py imports
+    # this module to reach broadcast_event()/get_monitor().
+    import audio_spectrum
+    return jsonify(audio_spectrum.status())
 
 
 @live_bp.route("/live/history")

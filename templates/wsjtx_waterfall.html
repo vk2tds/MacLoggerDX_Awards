@@ -3,50 +3,110 @@
 {% block content %}
 <h1>Waterfall</h1>
 <p style="color:#666; font-size:0.85rem; max-width:60em; margin-top:-0.5rem;">
-  Standalone view of the same decode-based waterfall shown on the <a href="{{ url_for('remote.remote_view') }}">Remote</a>
+  Standalone view of the same waterfall(s) shown on the <a href="{{ url_for('remote.remote_view') }}">Remote</a>
   tab -- always visible here regardless of that tab's show/hide checkbox, meant for keeping open on a second
-  monitor.
+  monitor. Two kinds: the original decode-based one (WSJT-X's UDP API has no spectrum data, so it only shows
+  signals actually decoded), and a real audio-spectrum waterfall captured directly from WSJT-X's own sound
+  input device (200 Hz-3 kHz, 4 Hz/bin).
 </p>
 
 <style>
   .waterfall-shell { overflow-x: auto; background: #07143a; border: 1px solid #b8b8b8; border-radius: 4px; }
-  #waterfall-canvas { display: block; }
+  #waterfall-canvas, #spectrum-canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; }
   .waterfall-caption { font-size: 0.7rem; color: #888; margin: 0.25rem 0 0.75rem; }
-  .waterfall-toolbar { display: flex; align-items: center; gap: 1rem; font-size: 0.85rem; margin-bottom: 0.4rem; }
+  .waterfall-toolbar { display: flex; align-items: center; gap: 1rem; font-size: 0.85rem; margin-bottom: 0.4rem; flex-wrap: wrap; }
   .waterfall-toolbar label { display: flex; align-items: center; gap: 0.3rem; }
   .waterfall-toolbar input[type=number] { width: 4em; }
   .conn-dot { display: inline-block; width: 0.7rem; height: 0.7rem; border-radius: 50%; background: #999; margin-right: 0.3rem; }
   .conn-dot.up { background: #2e9c4a; }
   .conn-dot.down { background: #c62828; }
+  .spectrum-ruler { display: flex; justify-content: space-between; font-size: 0.7rem; color: #9db3e0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; padding: 0.1rem 0.2rem; background: #1a2a5a; }
+  .spectrum-warn { font-size: 0.78rem; color: #b45309; margin-bottom: 0.4rem; }
 </style>
 
 <div class="waterfall-toolbar">
-  <label>Rows <input id="wf-rows" type="number" min="2" max="120" value="30"></label>
+  <label><input type="radio" name="wf-mode" value="decode" checked> Decode-based</label>
+  <label><input type="radio" name="wf-mode" value="spectrum_4hz"> Spectrum (4Hz update)</label>
+  <label><input type="radio" name="wf-mode" value="spectrum_1hz"> Spectrum (1Hz averaged)</label>
+  <label id="wf-rows-label">Rows <input id="wf-rows" type="number" min="2" max="120" value="30"></label>
+  <label id="spec-seconds-label" style="display:none;">Seconds <input id="spec-seconds" type="number" min="2" max="120" value="20"></label>
   <span><span class="conn-dot" id="conn-dot"></span><span id="conn-text">connecting…</span></span>
 </div>
-<div class="waterfall-shell">
+
+<p class="spectrum-warn" id="spectrum-warn" style="display:none;"></p>
+
+<div class="waterfall-shell" id="decode-shell">
   <canvas id="waterfall-canvas" width="900" height="676"></canvas>
 </div>
+
+<div class="waterfall-shell" id="spectrum-shell" style="display:none;">
+  <div class="spectrum-ruler"><span>200</span><span>760</span><span>1320</span><span>1880</span><span>2440</span><span>3000 Hz</span></div>
+  <canvas id="spectrum-canvas" width="700" height="400"></canvas>
+</div>
+
 <p class="waterfall-caption">
-  Decode-based waterfall -- WSJT-X's UDP API has no spectrum/noise-floor data, so this shows only signals it
-  actually decoded (colored by SNR), one row per decode cycle. Not a true spectrogram.
+  Decode-based waterfall shows only signals actually decoded (colored by SNR), one row per decode cycle --
+  not a true spectrogram. The spectrum modes are a real FFT of WSJT-X's own audio input, updated 4x/sec raw
+  or averaged down to ~1x/sec (smoother on bursty HF signals, uses the full second of audio instead of one
+  250ms slice of it).
 </p>
 
 <script src="{{ url_for('static', filename='waterfall.js') }}"></script>
+<script src="{{ url_for('static', filename='spectrum_waterfall.js') }}"></script>
 <script>
 (function () {
   const wfRowsInput = document.getElementById('wf-rows');
+  const wfRowsLabel = document.getElementById('wf-rows-label');
+  const specSecondsInput = document.getElementById('spec-seconds');
+  const specSecondsLabel = document.getElementById('spec-seconds-label');
   const dot = document.getElementById('conn-dot');
   const connText = document.getElementById('conn-text');
+  const decodeShell = document.getElementById('decode-shell');
+  const spectrumShell = document.getElementById('spectrum-shell');
+  const spectrumWarn = document.getElementById('spectrum-warn');
+  const modeRadios = document.querySelectorAll('input[name="wf-mode"]');
+
   const savedRows = parseInt(localStorage.getItem('wf_rows_standalone'), 10);
   const wf = createWaterfall(document.getElementById('waterfall-canvas'), { rows: savedRows || 30 });
   wfRowsInput.value = wf.rows;
+
+  const spectrum = createSpectrumWaterfall(document.getElementById('spectrum-canvas'));
+  const savedSeconds = parseInt(localStorage.getItem('spec_seconds_standalone'), 10);
+  specSecondsInput.value = spectrum.setSeconds(savedSeconds || 20);
 
   wfRowsInput.addEventListener('change', () => {
     const n = wf.resize(parseInt(wfRowsInput.value, 10));
     wfRowsInput.value = n;
     localStorage.setItem('wf_rows_standalone', String(n));
   });
+
+  specSecondsInput.addEventListener('change', () => {
+    const n = spectrum.setSeconds(parseInt(specSecondsInput.value, 10));
+    specSecondsInput.value = n;
+    localStorage.setItem('spec_seconds_standalone', String(n));
+  });
+
+  let mode = localStorage.getItem('wf_mode_standalone') || 'decode';
+  function applyMode() {
+    modeRadios.forEach(r => { r.checked = (r.value === mode); });
+    const isSpectrum = mode !== 'decode';
+    decodeShell.style.display = isSpectrum ? 'none' : '';
+    spectrumShell.style.display = isSpectrum ? '' : 'none';
+    wfRowsLabel.style.display = isSpectrum ? 'none' : '';
+    specSecondsLabel.style.display = isSpectrum ? '' : 'none';
+    if (isSpectrum) spectrum.setRate(mode === 'spectrum_4hz' ? 4 : 1);
+  }
+  modeRadios.forEach(r => r.addEventListener('change', () => {
+    if (r.checked) { mode = r.value; localStorage.setItem('wf_mode_standalone', mode); applyMode(); }
+  }));
+  applyMode();
+
+  fetch('/live/spectrum_status').then(r => r.json()).then(s => {
+    if (!s.capturing) {
+      spectrumWarn.textContent = 'Spectrum capture unavailable: ' + (s.error || 'unknown reason');
+      spectrumWarn.style.display = '';
+    }
+  }).catch(() => {});
 
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
@@ -59,6 +119,7 @@
       try { ev = JSON.parse(msg.data); } catch (e) { return; }
       if (ev.kind === 'decode') wf.onDecode(ev);
       else if (ev.kind === 'clear') wf.clear();
+      else if (ev.kind === mode && (ev.kind === 'spectrum_4hz' || ev.kind === 'spectrum_1hz')) spectrum.pushRow(ev.bins);
     };
   }
   connect();

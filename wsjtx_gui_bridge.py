@@ -154,7 +154,14 @@ def _element_center(name: str) -> tuple:
         end tell
     end tell
     '''
-    px, py, sw, sh = (float(v) for v in _run_osascript(script).split(","))
+    # Same transient-busy retry as the read path (_run_osascript_reading_value)
+    # -- confirmed live (2026-08-01) this lookup can hit the same class of
+    # error as checkbox reads (here: "Can't get window 1 of process ...
+    # whose name starts with WSJT-X. Invalid index (-1719)", i.e. the window
+    # enumeration momentarily came back empty), but unlike the read path it
+    # was calling _run_osascript() directly with no retry at all, so a
+    # single hiccup during a click surfaced immediately as a raw error.
+    px, py, sw, sh = (float(v) for v in _run_osascript_reading_value(script).split(","))
     return px + sw / 2, py + sh / 2
 
 

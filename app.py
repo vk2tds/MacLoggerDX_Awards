@@ -25,6 +25,7 @@ from flask_sock import Sock
 
 import macloggerdx_awards
 import awards_tree
+import audio_spectrum
 import dxcc_challenge
 import live_monitor
 import logbook
@@ -72,6 +73,8 @@ live_monitor.init_live_monitor(app, sock, live_monitor.LiveMonitorConfig(
     udp_port=2237,
     multicast_group="224.0.0.1",
 ))
+
+audio_spectrum.init_audio_spectrum()
 
 qsl_helper.init_qsl_helper(app, qsl_helper.QslHelperConfig(
     database_path=analysis.database_name,

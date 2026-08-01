@@ -42,8 +42,15 @@
   const connText = document.getElementById('dx-conn-text');
   const container = document.getElementById('dx-entities');
 
-  // dxcc_name -> { band, delta_freq_hz, entity_status, lastTime, calls: Map<call, {snr, time_ms, call_status}> }
+  // dxcc_name -> { band, delta_freq_hz, entity_status, lastTime, lastSeenWallClock, calls: Map<call, {snr, time_ms, call_status}> }
   const entities = new Map();
+
+  // "Time out after six hours" -- WSJT-X's own time_ms field is only
+  // ms-since-midnight-UTC (see fmtTime), not a real timestamp, so it can't
+  // tell you how long ago something actually was once you're near a day
+  // boundary. lastSeenWallClock is a real Date.now() captured whenever a
+  // live decode updates a group, used only for this expiry check.
+  const TIMEOUT_MS = 6 * 60 * 60 * 1000;
 
   function escapeHtml(s) {
     return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -73,6 +80,7 @@
     group.delta_freq_hz = ev.delta_freq_hz;
     group.entity_status = ev.entity_status;
     group.lastTime = ev.time_ms;
+    group.lastSeenWallClock = Date.now();
     group.calls.set(ev.call, { snr: ev.snr, time_ms: ev.time_ms, call_status: ev.call_status });
     if (group.calls.size > 3) {
       let oldestCall = null, oldestTime = Infinity;
@@ -83,7 +91,15 @@
     }
   }
 
+  function pruneExpired() {
+    const now = Date.now();
+    for (const [name, group] of entities) {
+      if (now - (group.lastSeenWallClock ?? now) > TIMEOUT_MS) entities.delete(name);
+    }
+  }
+
   function renderAll() {
+    pruneExpired();
     if (entities.size === 0) {
       container.innerHTML = '<p class="dx-empty">No decodes yet -- waiting for WSJT-X.</p>';
       return;
@@ -137,6 +153,11 @@
     events.forEach(ev => { if (ev.kind === 'decode') handleDecode(ev); });
     renderAll();
   }).catch(() => {}).finally(connect);
+
+  // Re-render periodically even with no new decodes, so an entity actually
+  // disappears close to the 6h mark instead of lingering until whenever
+  // the next unrelated decode happens to trigger a re-render.
+  setInterval(renderAll, 5 * 60 * 1000);
 })();
 </script>
 {% endblock %}
