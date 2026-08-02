@@ -98,7 +98,20 @@ class LiveMonitorConfig:
     udp_host: str = "127.0.0.1"
     udp_port: int = 2237
     multicast_group: Optional[str] = None
-    history_size: int = 300
+    # Replayed to any page that (re)loads /live/history -- this is what a
+    # browser tab rebuilds its whole in-memory view from (DX Monitor's
+    # entity list/activity boxes, Logbook's Live toggle, etc.) whenever it's
+    # reloaded, e.g. after the browser discards a backgrounded tab and the
+    # user switches back to it. 300 was too small in practice -- on a busy
+    # band with lots of simultaneous decodes it could be exhausted within a
+    # couple of minutes, so a tab reload after being away just 10-15 minutes
+    # could lose everything older than that. Bumped up to comfortably cover
+    # a good chunk of DX Monitor's 90-minute activity-box window even on a
+    # busy multi-signal band (confirmed live 2026-08-02 this was the actual
+    # cause of a reported "history just disappeared" complaint -- the app
+    # process itself had been running continuously the whole time, so it
+    # wasn't a server restart).
+    history_size: int = 5000
     refresh_worked_sets_interval_s: float = 300.0
 
     @property
