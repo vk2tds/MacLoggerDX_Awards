@@ -62,6 +62,16 @@ DEFAULT_DXCC_URI = "http://www.arrl.org/files/file/DXCC/2019_Current_Deleted(3).
 _RUSSIA_CALL_AREA_RE = re.compile(r"^(?:UA|UI|R[A-Z]?)([0-9])")
 _RUSSIA_EUROPEAN_AREAS = set("1234567")
 
+# KG4 is a genuinely irregular ARRL special case, not expressible via the
+# generic literal/range model: dxcc.txt's "KG4#" prefix field, taken at face
+# value, would out-match USA's own "K" literal for every KG4 call regardless
+# of suffix -- but ARRL's actual rule (in effect since 2003) is that only a
+# *two-letter* suffix counts as Guantanamo Bay; one- or three-letter KG4
+# suffixes are ordinary USA. Confirmed live (2026-08-02): KG4OJT (3-letter
+# suffix, grid FM18 -- mainland Virginia/NC, nowhere near Cuba) was
+# misresolving to Guantanamo Bay under the naive longest-prefix match.
+_KG4_RE = re.compile(r"^KG4([A-Z]+)$")
+
 
 @dataclasses.dataclass
 class Entity:
@@ -210,9 +220,16 @@ class DxccResolver:
         self._russia_asiatic = next((e for e in self.entities if e.name == "Asiatic Russia"), None)
         russia_entities = {id(e) for e in (self._russia_european, self._russia_asiatic) if e is not None}
 
+        # See _KG4_RE above -- Guantanamo Bay is resolved by suffix length in
+        # lookup(), not the generic rules, so skip its "KG4" literal here
+        # (it would otherwise out-match USA's own "K" literal for every KG4
+        # call regardless of suffix).
+        self._guantanamo = next((e for e in self.entities if e.name == "Guantanamo Bay"), None)
+        guantanamo_entities = {id(self._guantanamo)} if self._guantanamo is not None else set()
+
         self.rules: list = []
         for ent in self.entities:
-            if id(ent) in russia_entities:
+            if id(ent) in russia_entities or id(ent) in guantanamo_entities:
                 continue
             for tok in _expand_prefix_field(ent.prefix_field):
                 if tok[0] == "literal":
@@ -240,6 +257,14 @@ class DxccResolver:
             if m:
                 area = m.group(1)
                 return self._russia_european if area in _RUSSIA_EUROPEAN_AREAS else self._russia_asiatic
+
+        if self._guantanamo:
+            m = _KG4_RE.match(base)
+            if m and len(m.group(1)) == 2:
+                return self._guantanamo
+            # else: fall through to the generic rules below, which correctly
+            # resolve non-2-letter-suffix KG4 calls to USA via its own "K"
+            # literal (Guantanamo's "KG4" rule was excluded above).
 
         best = None
         best_len = -1

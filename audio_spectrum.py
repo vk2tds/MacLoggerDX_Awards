@@ -25,6 +25,19 @@ No new Flask route for the data itself -- broadcasts over the existing
 transport wsjtx_remote.py already reuses. Only /live/spectrum_status (see
 live_monitor.py) exists to let the frontend show a clear message if no
 matching audio device was found, rather than a silently blank panel.
+
+Lazy since 2026-08-02: the input stream doesn't open at startup any more --
+only device *resolution* (query_devices(), no audio actually captured)
+happens eagerly in init_audio_spectrum(), so /live/spectrum_status can still
+report a real error immediately. The stream itself only opens once at least
+one browser client is actually viewing a spectrum mode, and closes again
+once the last one stops -- see add_listener()/remove_listener() below, and
+the "spectrum_listen"/"spectrum_unlisten" websocket actions in
+live_monitor.py's /live/ws route, which call these based on which mode the
+Waterfall tab / Remote tab's embedded panel currently has selected (and,
+for the embedded panel, whether it's shown at all). Without this, the mic
+stayed open and the FFT ran continuously for the life of the process
+regardless of whether any browser tab was even looking at it.
 """
 
 from __future__ import annotations
@@ -33,6 +46,7 @@ import collections
 import logging
 import os
 import re
+import threading
 from typing import Optional
 
 import numpy as np
@@ -110,8 +124,14 @@ class AudioSpectrum:
         self._window = np.hanning(self.BLOCK_SIZE).astype(np.float32)
         self._avg_buffer: collections.deque = collections.deque(maxlen=self.AVG_BLOCKS)
         self._block_count = 0
+        self._listener_count = 0
+        self._lock = threading.Lock()
 
-    def start(self):
+    def resolve_device(self):
+        """Validates sounddevice/device availability without opening the
+        stream -- called once eagerly at startup so /live/spectrum_status
+        can report a real error immediately, even with zero listeners
+        (laziness only defers the actual audio capture, not error checks)."""
         if not _SOUNDDEVICE_AVAILABLE:
             self.error = "sounddevice is not installed (pip install sounddevice)"
             log.warning(self.error)
@@ -129,7 +149,15 @@ class AudioSpectrum:
         if self.device_index is None:
             self.error = f"Audio input device {self.device_name!r} (WSJT-X's configured SoundInName) not found"
             log.warning(self.error)
+
+    def _open_stream(self):
+        if self.stream is not None or self.device_index is None:
             return
+        # Fresh state each time capture (re)starts, so the 1Hz average
+        # doesn't blend blocks from a previous listener session across
+        # whatever gap of time it was closed for.
+        self._avg_buffer.clear()
+        self._block_count = 0
         try:
             self.stream = sd.InputStream(
                 device=self.device_index, channels=1, samplerate=self.SAMPLE_RATE,
@@ -142,6 +170,24 @@ class AudioSpectrum:
             log.exception(self.error)
             self.stream = None
 
+    def add_listener(self):
+        """Called when a browser client starts viewing a spectrum mode --
+        opens the audio stream on the first listener, no-ops otherwise."""
+        with self._lock:
+            self._listener_count += 1
+            if self._listener_count == 1:
+                self._open_stream()
+
+    def remove_listener(self):
+        """Called when a browser client stops viewing a spectrum mode (mode
+        switch, page close/navigate, or dropped connection) -- closes the
+        audio stream once the last listener is gone."""
+        with self._lock:
+            if self._listener_count > 0:
+                self._listener_count -= 1
+            if self._listener_count == 0:
+                self.stop()
+
     def stop(self):
         if self.stream is not None:
             try:
@@ -150,6 +196,7 @@ class AudioSpectrum:
             except Exception:
                 pass
             self.stream = None
+            log.info("Audio spectrum capture stopped (no listeners)")
 
     def _on_audio(self, indata, frames, time_info, status):
         if status:
@@ -185,9 +232,13 @@ class AudioSpectrum:
     def status(self) -> dict:
         return {
             "available": _SOUNDDEVICE_AVAILABLE,
+            # False whenever nobody's listening -- that's the expected lazy
+            # state, not an error. Check "error" for whether something's
+            # actually wrong.
             "capturing": self.stream is not None and self.error is None,
             "device_name": self.device_name,
             "error": self.error,
+            "listener_count": self._listener_count,
         }
 
 
@@ -198,7 +249,16 @@ def init_audio_spectrum():
     global _spectrum
     device_name = _read_wsjtx_input_device_name()
     _spectrum = AudioSpectrum(device_name)
-    _spectrum.start()
+    # Only resolves/validates the device -- doesn't open the audio stream.
+    # That's deferred to the first add_listener() call, see module docstring.
+    _spectrum.resolve_device()
+    return _spectrum
+
+
+def get_spectrum() -> Optional[AudioSpectrum]:
+    """Accessor for live_monitor.py's /live/ws route, which calls
+    add_listener()/remove_listener() based on "spectrum_listen"/
+    "spectrum_unlisten" client messages."""
     return _spectrum
 
 

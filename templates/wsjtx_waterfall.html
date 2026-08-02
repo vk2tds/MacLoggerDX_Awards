@@ -86,6 +86,17 @@
     localStorage.setItem('spec_seconds_standalone', String(n));
   });
 
+  // Tells the server whether this connection currently wants spectrum data
+  // -- audio_spectrum.py only opens the audio stream while at least one
+  // client somewhere is actually listening (see its module docstring), so
+  // switching modes needs to notify it, not just change what's drawn here.
+  let currentWs = null;
+  function updateSpectrumSubscription() {
+    if (!currentWs || currentWs.readyState !== WebSocket.OPEN) return;
+    const wantSpectrum = (mode === 'spectrum_4hz' || mode === 'spectrum_1hz');
+    currentWs.send(JSON.stringify({ action: wantSpectrum ? 'spectrum_listen' : 'spectrum_unlisten' }));
+  }
+
   let mode = localStorage.getItem('wf_mode_standalone') || 'decode';
   function applyMode() {
     modeRadios.forEach(r => { r.checked = (r.value === mode); });
@@ -95,6 +106,7 @@
     wfRowsLabel.style.display = isSpectrum ? 'none' : '';
     specSecondsLabel.style.display = isSpectrum ? '' : 'none';
     if (isSpectrum) spectrum.setRate(mode === 'spectrum_4hz' ? 4 : 1);
+    updateSpectrumSubscription();
   }
   modeRadios.forEach(r => r.addEventListener('change', () => {
     if (r.checked) { mode = r.value; localStorage.setItem('wf_mode_standalone', mode); applyMode(); }
@@ -102,8 +114,10 @@
   applyMode();
 
   fetch('/live/spectrum_status').then(r => r.json()).then(s => {
-    if (!s.capturing) {
-      spectrumWarn.textContent = 'Spectrum capture unavailable: ' + (s.error || 'unknown reason');
+    // "capturing: false" is the expected lazy state whenever nobody's
+    // listening yet -- only a real "error" means something's actually wrong.
+    if (s.error) {
+      spectrumWarn.textContent = 'Spectrum capture unavailable: ' + s.error;
       spectrumWarn.style.display = '';
     }
   }).catch(() => {});
@@ -111,7 +125,11 @@
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
     const ws = new WebSocket(proto + location.host + '/live/ws');
-    ws.onopen = () => { dot.className = 'conn-dot up'; connText.textContent = 'connected'; };
+    currentWs = ws;
+    ws.onopen = () => {
+      dot.className = 'conn-dot up'; connText.textContent = 'connected';
+      updateSpectrumSubscription(); // re-establish on (re)connect
+    };
     ws.onclose = () => { dot.className = 'conn-dot down'; connText.textContent = 'disconnected -- retrying...'; setTimeout(connect, 2000); };
     ws.onerror = () => ws.close();
     ws.onmessage = (msg) => {

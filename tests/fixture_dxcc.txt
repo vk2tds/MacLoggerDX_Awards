@@ -13,6 +13,7 @@ Notes:
     F                  France                             EU    27    14    227
     JA-JS,7J-7N        Japan                              AS    45    25    339
     K,W,N,AA-AK#       United States of America           NA    06-08 03-05 291
+    KG4#               Guantanamo Bay                     NA    11    08    105
     VK#                Australia                          OC    (I)   29,30 150
     VK9#               Cocos (Keeling) Is.                OC    54    29    038
     9M2,4(8)           West Malaysia                      AS    54    28    299

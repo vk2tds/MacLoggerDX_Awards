@@ -471,6 +471,12 @@ def init_live_monitor(app, sock, config: LiveMonitorConfig) -> LiveMonitor:
     def ws_live(ws):  # noqa: ANN001 -- flask_sock supplies this
         client_q = _monitor.register_client()
         stop = threading.Event()
+        # Tracks whether *this* connection currently holds a spectrum
+        # listener slot (audio_spectrum.py's lazy start/stop -- see its
+        # module docstring), so an ungraceful disconnect (tab closed,
+        # navigated away, crashed) still releases it via the finally block
+        # below, same as unregister_client() already does for client_q.
+        is_spectrum_listener = False
 
         def sender():
             while not stop.is_set():
@@ -497,13 +503,33 @@ def init_live_monitor(app, sock, config: LiveMonitorConfig) -> LiveMonitor:
                     cmd = json.loads(data)
                 except (TypeError, ValueError):
                     continue
-                if isinstance(cmd, dict) and cmd.get("action") == "reply":
+                if not isinstance(cmd, dict):
+                    continue
+                action = cmd.get("action")
+                if action == "reply":
                     _monitor.handle_reply_action(cmd.get("event") or {})
+                elif action == "spectrum_listen" and not is_spectrum_listener:
+                    import audio_spectrum  # local import -- avoids a circular import at module load
+                    spectrum = audio_spectrum.get_spectrum()
+                    if spectrum is not None:
+                        spectrum.add_listener()
+                        is_spectrum_listener = True
+                elif action == "spectrum_unlisten" and is_spectrum_listener:
+                    import audio_spectrum
+                    spectrum = audio_spectrum.get_spectrum()
+                    if spectrum is not None:
+                        spectrum.remove_listener()
+                    is_spectrum_listener = False
         except Exception:
             pass
         finally:
             stop.set()
             _monitor.unregister_client(client_q)
+            if is_spectrum_listener:
+                import audio_spectrum
+                spectrum = audio_spectrum.get_spectrum()
+                if spectrum is not None:
+                    spectrum.remove_listener()
 
     return _monitor
 
@@ -530,19 +556,26 @@ def live_entities_view():
 # "remember on the server" here just means shared across browsers/tabs
 # rather than stuck in one browser's localStorage, not that it needs to
 # survive an app restart.
-_find_scan_state = {"bands": [], "tune_enabled": False, "loop": False}
+#
+# preset_ids used to be "bands" (WSJT-X band-button label strings, e.g.
+# "20") -- renamed once Find moved from clicking WSJT-X's own band buttons
+# to tuning directly via rigctld against Frequencies-tab presets flagged
+# "find" (see templates/live_entities.html), since entries are now preset
+# ids, not band labels. Any old "bands" selection is simply not carried
+# forward -- this is a small convenience cache, not data worth migrating.
+_find_scan_state = {"preset_ids": [], "tune_enabled": False, "loop": False}
 
 
 @live_bp.route("/live/find_config", methods=["GET", "POST"])
 def live_find_config():
-    """Persists the DX Monitor 'Find' box's band selection + tune/loop
+    """Persists the DX Monitor 'Find' box's preset selection + tune/loop
     toggles -- see templates/live_entities.html. Deliberately its own tiny
     endpoint rather than folded into /live/config, since it's Find-widget
     state, not a live-decode setting."""
     if request.method == "POST":
         body = request.get_json(silent=True) or {}
-        if isinstance(body.get("bands"), list):
-            _find_scan_state["bands"] = [str(b) for b in body["bands"]]
+        if isinstance(body.get("preset_ids"), list):
+            _find_scan_state["preset_ids"] = [str(b) for b in body["preset_ids"]]
         if "tune_enabled" in body:
             _find_scan_state["tune_enabled"] = bool(body["tune_enabled"])
         if "loop" in body:

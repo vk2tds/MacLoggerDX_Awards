@@ -54,18 +54,7 @@
 
 <fieldset class="dx-find-box">
   <legend>Find</legend>
-  <div class="dx-find-bands">
-    <label><input type="checkbox" class="find-band" value="160"> 160</label>
-    <label><input type="checkbox" class="find-band" value="80"> 80</label>
-    <label><input type="checkbox" class="find-band" value="40"> 40</label>
-    <label><input type="checkbox" class="find-band" value="30"> 30</label>
-    <label><input type="checkbox" class="find-band" value="20"> 20</label>
-    <label><input type="checkbox" class="find-band" value="17"> 17</label>
-    <label><input type="checkbox" class="find-band" value="15"> 15</label>
-    <label><input type="checkbox" class="find-band" value="12"> 12</label>
-    <label><input type="checkbox" class="find-band" value="10"> 10</label>
-    <label><input type="checkbox" class="find-band" value="6"> 6</label>
-  </div>
+  <div class="dx-find-bands" id="dx-find-bands"></div>
   <div class="dx-find-controls">
     <label><input type="checkbox" id="find-tune-enabled"> Tune each band</label>
     <label><input type="checkbox" id="find-loop"> Loop</label>
@@ -377,13 +366,15 @@
   // the next unrelated decode happens to trigger a re-render.
   setInterval(renderAll, 5 * 60 * 1000);
 
-  // -- Find: scan a chosen set of bands, one at a time, via the same GUI
-  // bridge (wsjtx_gui_bridge.py, through wsjtx_remote.py's /remote/gui/*
-  // routes) the Remote tab uses for its band buttons and Tune checkbox --
-  // no new server-side control surface needed, just this page driving the
-  // existing one on a timer. Currently embedded here; may move to its own
+  // -- Find: scan a chosen set of frequency presets (Frequencies tab,
+  // flagged "Find"), one at a time. Tunes the rig directly via rigctld
+  // (/radio/frequency) instead of clicking WSJT-X's own band button, per
+  // the user's own "move away from WSJT-X band buttons" direction -- only
+  // the optional Tune burst still goes through WSJT-X's own GUI bridge
+  // (wsjtx_gui_bridge.py via /remote/gui/checkbox), since Tune itself has
+  // no rigctld equivalent. Currently embedded here; may move to its own
   // page later, per the user's own note when this was requested.
-  const findBandBoxes = document.querySelectorAll('.find-band');
+  const findBandsContainer = document.getElementById('dx-find-bands');
   const findTuneBox = document.getElementById('find-tune-enabled');
   const findLoopBox = document.getElementById('find-loop');
   const findScanBtn = document.getElementById('find-scan-btn');
@@ -396,22 +387,51 @@
     }).then(r => r.json());
   }
 
+  // Presets flagged "find" -- fetched once on load alongside the saved
+  // selection; edit the Frequencies tab and reload this page to pick up
+  // changes. Kept around so the scan loop can look up freq_hz by id.
+  let findPresets = [];
+
   function saveFindConfig() {
     postJson('/live/find_config', {
-      bands: Array.from(findBandBoxes).filter(cb => cb.checked).map(cb => cb.value),
+      preset_ids: Array.from(findBandsContainer.querySelectorAll('.find-band'))
+        .filter(cb => cb.checked).map(cb => cb.value),
       tune_enabled: findTuneBox.checked,
       loop: findLoopBox.checked,
     }).catch(() => {});
   }
-  findBandBoxes.forEach(cb => cb.addEventListener('change', saveFindConfig));
+
+  function renderFindPresets(savedIds) {
+    findBandsContainer.innerHTML = '';
+    if (findPresets.length === 0) {
+      findBandsContainer.textContent = 'No presets flagged "Find" -- add some on the Frequencies tab.';
+      return;
+    }
+    findPresets.forEach(p => {
+      const label = document.createElement('label');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.className = 'find-band';
+      cb.value = String(p.id);
+      cb.checked = savedIds.has(String(p.id));
+      cb.addEventListener('change', saveFindConfig);
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(` ${p.name} (${(p.freq_hz / 1e6).toFixed(6)})`));
+      findBandsContainer.appendChild(label);
+    });
+  }
+
   findTuneBox.addEventListener('change', saveFindConfig);
   findLoopBox.addEventListener('change', saveFindConfig);
 
-  fetch('/live/find_config').then(r => r.json()).then(cfg => {
-    const saved = new Set(cfg.bands || []);
-    findBandBoxes.forEach(cb => { cb.checked = saved.has(cb.value); });
+  Promise.all([
+    fetch('/frequencies/presets').then(r => r.json()),
+    fetch('/live/find_config').then(r => r.json()),
+  ]).then(([presetsData, cfg]) => {
+    findPresets = (presetsData.presets || []).filter(p => p.find);
     findTuneBox.checked = !!cfg.tune_enabled;
     findLoopBox.checked = !!cfg.loop;
+    renderFindPresets(new Set((cfg.preset_ids || []).map(String)));
   }).catch(() => {});
 
   let scanCancelled = false;
@@ -457,9 +477,9 @@
     return mod === 0 ? fromMs : fromMs + (GRID_MS - mod);
   }
 
-  async function clickBand(band) {
-    const d = await postJson('/remote/gui/button', { name: band });
-    if (!d.ok) throw new Error(d.error || `Failed to switch to ${band}m`);
+  async function tuneToFreq(freqHz) {
+    const d = await postJson('/radio/frequency', { frequency_hz: freqHz });
+    if (!d.ok) throw new Error(d.error || 'Failed to set frequency');
   }
 
   async function setTune(on) {
@@ -468,14 +488,16 @@
   }
 
   async function runScan() {
-    const bands = Array.from(findBandBoxes).filter(cb => cb.checked).map(cb => cb.value);
-    if (bands.length === 0) { findStatus.textContent = 'Select at least one band first.'; return; }
+    const selectedIds = new Set(Array.from(findBandsContainer.querySelectorAll('.find-band'))
+      .filter(cb => cb.checked).map(cb => cb.value));
+    const selectedPresets = findPresets.filter(p => selectedIds.has(String(p.id)));
+    if (selectedPresets.length === 0) { findStatus.textContent = 'Select at least one preset first.'; return; }
     const tuneEachBand = findTuneBox.checked;
     const loopEnabled = findLoopBox.checked;
-    // Captured once, before the first band switch, so both a natural finish
-    // and a Cancel can put the radio back where it actually was -- not
-    // wherever "before" would mean after several loop passes.
-    const originalBand = currentBand ? currentBand.replace(/M$/, '') : null;
+    // Captured once, before the first frequency change, so both a natural
+    // finish and a Cancel can put the radio back where it actually was --
+    // not wherever "before" would mean after several loop passes.
+    const originalFreqHz = currentDialHz;
 
     scanCancelled = false;
     findScanBtn.disabled = true;
@@ -484,60 +506,62 @@
     let resultText;
     try {
       do {
-        for (const band of bands) {
+        for (const preset of selectedPresets) {
           if (scanCancelled) break;
-          // If we're already sitting on this band (tracked via WSJT-X's own
-          // Status broadcasts -- see applyStatus()/currentBand above), there's
-          // no antenna/tuner mismatch to correct, so skip the Tune burst even
-          // if "Tune each band" is checked. Read before clickBand() runs, so
-          // it reflects where we actually were, not wherever we're headed.
-          const alreadyOnBand = currentBand === (band + 'M');
-          const doTune = tuneEachBand && !alreadyOnBand;
+          const label = `${preset.name} (${(preset.freq_hz / 1e6).toFixed(6)})`;
+          // If we're already sitting on this exact frequency (tracked via
+          // WSJT-X's own Status broadcasts -- see applyStatus()/currentDialHz
+          // above), there's no antenna/tuner mismatch to correct, so skip
+          // the Tune burst even if "Tune each band" is checked. Read before
+          // tuneToFreq() runs, so it reflects where we actually were, not
+          // wherever we're headed.
+          const alreadyThere = currentDialHz === preset.freq_hz;
+          const doTune = tuneEachBand && !alreadyThere;
 
-          findStatus.textContent = `${band}m: switching...`;
-          await clickBand(band);
+          findStatus.textContent = `${label}: tuning to frequency...`;
+          await tuneToFreq(preset.freq_hz);
           if (scanCancelled) break;
 
-          if (tuneEachBand && alreadyOnBand) {
-            findStatus.textContent = `${band}m: already on this band -- skipping tune`;
+          if (tuneEachBand && alreadyThere) {
+            findStatus.textContent = `${label}: already on this frequency -- skipping tune`;
           }
 
           if (doTune) {
             // Tune burst pinned to seconds 5-10 of the *next* grid cycle, so
             // "wait 5 seconds into the interval" means 5 real seconds into an
             // actual WSJT-X decode cycle, not just 5 seconds after whenever
-            // clickBand() happened to return. Tune off always runs
+            // tuneToFreq() happened to return. Tune off always runs
             // unconditionally, even if Cancel landed mid-burst (also
             // backstopped by the Cancel button's own handler below).
             const cycleStart = nextGridBoundary(Date.now());
-            const reached = await waitUntil(cycleStart + 5000, `${band}m: waiting to tune`);
+            const reached = await waitUntil(cycleStart + 5000, `${label}: waiting to tune`);
             if (reached && !scanCancelled) {
-              findStatus.textContent = `${band}m: tuning...`;
+              findStatus.textContent = `${label}: tuning...`;
               await setTune(true);
-              await waitUntil(cycleStart + 10000, `${band}m: tuning`);
+              await waitUntil(cycleStart + 10000, `${label}: tuning`);
               await setTune(false);
               // Ending the tune-off wait at cycleStart+15000 also happens to
               // be the start of the next grid cycle -- "listen starts 5s
               // after tuning completes" and "listen starts on a clean cycle
               // boundary" are the same instant by construction.
-              await waitUntil(cycleStart + 15000, `${band}m: settling after tune`);
+              await waitUntil(cycleStart + 15000, `${label}: settling after tune`);
             }
             if (scanCancelled) break;
           } else {
-            // No tune happened (toggle off, or already on this band) -- still
-            // snap forward to the next grid boundary before counting listen
+            // No tune happened (toggle off, or already there) -- still snap
+            // forward to the next grid boundary before counting listen
             // cycles, so "two complete intervals" means two real, aligned
             // WSJT-X decode cycles rather than an arbitrary 30s window
             // straddling partial ones.
-            const boundaryReached = await waitUntil(nextGridBoundary(Date.now()), `${band}m: waiting for next cycle`);
+            const boundaryReached = await waitUntil(nextGridBoundary(Date.now()), `${label}: waiting for next cycle`);
             if (!boundaryReached || scanCancelled) break;
           }
 
-          // Regardless of whether this band was tuned, always listen for two
-          // full 15s intervals before moving on.
-          const listened1 = await wait(15, `${band}m: listening (1/2)`);
+          // Regardless of whether this frequency was tuned, always listen
+          // for two full 15s intervals before moving on.
+          const listened1 = await wait(15, `${label}: listening (1/2)`);
           if (!listened1 || scanCancelled) break;
-          const listened2 = await wait(15, `${band}m: listening (2/2)`);
+          const listened2 = await wait(15, `${label}: listening (2/2)`);
           if (!listened2 || scanCancelled) break;
         }
       } while (loopEnabled && !scanCancelled);
@@ -547,13 +571,14 @@
     } finally {
       // Put the radio back where it actually was before Scan was pressed --
       // for a normal finish as well as a Cancel, per the user's own request.
-      if (originalBand) {
-        findStatus.textContent = `${resultText} Restoring ${originalBand}m...`;
+      if (originalFreqHz) {
+        const freqLabel = (originalFreqHz / 1e6).toFixed(6);
+        findStatus.textContent = `${resultText} Restoring ${freqLabel}...`;
         try {
-          await clickBand(originalBand);
-          findStatus.textContent = `${resultText} Back on ${originalBand}m.`;
+          await tuneToFreq(originalFreqHz);
+          findStatus.textContent = `${resultText} Back on ${freqLabel}.`;
         } catch (exc) {
-          findStatus.textContent = `${resultText} (failed to restore ${originalBand}m: ${exc.message})`;
+          findStatus.textContent = `${resultText} (failed to restore ${freqLabel}: ${exc.message})`;
         }
       } else {
         findStatus.textContent = resultText;

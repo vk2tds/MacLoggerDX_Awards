@@ -40,7 +40,7 @@ def test_expand_digit_prefixed_range():
 
 def test_resolver_loads_fixture():
     r = DxccResolver(FIXTURE)
-    assert len(r.entities) == 11
+    assert len(r.entities) == 12
 
 
 def test_lookup_japan_digit_prefixed_range_not_nicaragua():
@@ -127,3 +127,20 @@ def test_lookup_russia_splits_by_call_area_digit():
     for call in asiatic:
         ent = r.lookup(call)
         assert ent is not None and ent.name == "Asiatic Russia", f"{call} -> {ent}"
+
+
+def test_lookup_kg4_two_letter_suffix_is_guantanamo():
+    # Regression: dxcc.txt's "KG4#" prefix, taken literally, out-matches
+    # USA's own "K" for every KG4 call regardless of suffix length. Real
+    # ARRL rule: only a two-letter KG4 suffix is Guantanamo Bay.
+    r = DxccResolver(FIXTURE)
+    assert r.lookup("KG4AB").name == "Guantanamo Bay"
+    assert r.lookup("KG4XY").name == "Guantanamo Bay"
+
+
+def test_lookup_kg4_one_or_three_letter_suffix_is_usa():
+    # Regression: KG4OJT (grid FM18 -- mainland Virginia/NC) was
+    # misresolving to Guantanamo Bay before this fix.
+    r = DxccResolver(FIXTURE)
+    assert r.lookup("KG4OJT").name == "United States of America"
+    assert r.lookup("KG4A").name == "United States of America"

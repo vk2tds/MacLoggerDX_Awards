@@ -4,12 +4,13 @@
 <h1>WSJT-X Remote</h1>
 <p style="color:#666; font-size:0.85rem; max-width:60em; margin-top:-0.5rem;">
   Remote control surface for WSJT-X. Most controls go over its UDP API; a few (Stop, Monitor, Decode, Enable
-  Tx, Tune, and the band/mode buttons) have no UDP equivalent at all and instead drive WSJT-X's own window
+  Tx, Tune, and the mode buttons) have no UDP equivalent at all and instead drive WSJT-X's own window
   directly -- see the hint text below the button row if that stops working (it needs WSJT-X running,
   Accessibility permission, and pyobjc-framework-Quartz installed). Enable Tx and Tune genuinely arm/key the
   transmitter when checked -- turning either off goes through the ordinary Halt Tx UDP command, not another
-  GUI click. Rig frequency/band control is separate: see the
-  <a href="{{ url_for('radio.radio_view') }}">Radio</a> tab (rigctld).
+  GUI click. The band-select buttons below tune the rig directly via rigctld (same connection as the
+  <a href="{{ url_for('radio.radio_view') }}">Radio</a> tab) instead of clicking WSJT-X's own band button --
+  edit which presets show there on the <a href="{{ url_for('frequencies.frequencies_view') }}">Frequencies</a> tab.
 </p>
 <p style="font-size:0.85rem; margin: 0 0 0.5rem;">
   <label>My call <input id="my-call" type="text" value="{{ my_call }}" size="10"></label>
@@ -75,9 +76,11 @@
   .mode-stack button.active { background: #2f6fed; color: #fff; border-color: #2f6fed; font-weight: 600; }
 
   .center-col { flex: 1 1 320px; min-width: 280px; display: flex; flex-direction: column; gap: 0.5rem; }
-  .band-row { display: flex; gap: 2px; flex-wrap: wrap; }
-  .band-row button { flex: 1 1 auto; min-width: 2.6rem; padding: 0.35rem 0.2rem; border: 1px solid #999; background: #e8e8e8; color: #999; cursor: not-allowed; font-size: 0.78rem; border-radius: 2px; }
+  .band-row { display: flex; gap: 2px; flex-wrap: wrap; font-size: 0.78rem; color: #666; }
+  .band-row button { flex: 1 1 auto; min-width: 2.6rem; padding: 0.35rem 0.2rem; border: 1px solid #999; background: #e8e8e8; color: #333; cursor: pointer; font-size: 0.78rem; border-radius: 2px; }
+  .band-row button:hover { background: #d8d8d8; }
   .band-row button.current { background: #2e9c4a; color: #fff; border-color: #2e9c4a; cursor: default; }
+  .band-row button.current:hover { background: #2e9c4a; }
 
   .btn-row { display: flex; gap: 0.3rem; flex-wrap: wrap; align-items: center; }
   .btn-row button { padding: 0.3rem 0.7rem; border: 1px solid #999; background: #f4f4f4; font-size: 0.8rem; border-radius: 3px; cursor: pointer; }
@@ -163,13 +166,7 @@
     </p>
   </div>
 
-  <div class="band-row" title="Clicks WSJT-X's own band button (via GUI scripting) -- for actual rig frequency control use the Radio tab (rigctld)">
-    <button class="band-btn">160</button><button class="band-btn">80</button><button class="band-btn">60</button>
-    <button class="band-btn">40</button><button class="band-btn">30</button><button class="band-btn">20</button>
-    <button class="band-btn">17</button><button class="band-btn">15</button><button class="band-btn">12</button>
-    <button class="band-btn">10</button><button class="band-btn">6</button><button class="band-btn">2</button>
-    <button class="band-btn">70</button>
-  </div>
+  <div class="band-row" id="remote-band-row" title="Tunes the rig directly via rigctld -- edit which presets show here on the Frequencies tab (check the Remote box)"></div>
 
   <div class="btn-row" style="margin: 0.5rem 0;">
     <label><input type="checkbox" disabled> CQ only</label>
@@ -357,12 +354,26 @@
     localStorage.setItem('wf_rows', String(n));
   });
 
+  // Tells the server whether this connection currently wants spectrum data
+  // -- audio_spectrum.py only opens the audio stream while at least one
+  // client somewhere is actually listening (see its module docstring), so
+  // both a mode switch and hiding the whole waterfall block need to notify
+  // it, not just change what's drawn here. Defined up here (before wfMode
+  // exists) but only ever called later, once the whole script has run --
+  // function declarations are hoisted, so this is safe.
+  function updateSpectrumSubscription() {
+    if (!currentWs || currentWs.readyState !== WebSocket.OPEN) return;
+    const wantSpectrum = wfShowBox.checked && (wfMode === 'spectrum_4hz' || wfMode === 'spectrum_1hz');
+    currentWs.send(JSON.stringify({ action: wantSpectrum ? 'spectrum_listen' : 'spectrum_unlisten' }));
+  }
+
   const savedShow = localStorage.getItem('wf_show');
   if (savedShow !== null) wfShowBox.checked = savedShow === '1';
   waterfallBlock.style.display = wfShowBox.checked ? '' : 'none';
   wfShowBox.addEventListener('change', () => {
     waterfallBlock.style.display = wfShowBox.checked ? '' : 'none';
     localStorage.setItem('wf_show', wfShowBox.checked ? '1' : '0');
+    updateSpectrumSubscription();
   });
 
   // -- Spectrum waterfall mode selector (audio_spectrum.py, real FFT of
@@ -395,6 +406,7 @@
     wfRowsLabel.style.display = isSpectrum ? 'none' : '';
     specSecondsLabel.style.display = isSpectrum ? '' : 'none';
     if (isSpectrum) spectrum.setRate(wfMode === 'spectrum_4hz' ? 4 : 1);
+    updateSpectrumSubscription();
   }
   modeRadios.forEach(r => r.addEventListener('change', () => {
     if (r.checked) { wfMode = r.value; localStorage.setItem('wf_mode_embedded', wfMode); applyWfMode(); }
@@ -402,18 +414,47 @@
   applyWfMode();
 
   fetch('/live/spectrum_status').then(r => r.json()).then(s => {
-    if (!s.capturing) {
-      spectrumWarn.textContent = 'Spectrum capture unavailable: ' + (s.error || 'unknown reason');
+    // "capturing: false" is the expected lazy state whenever nobody's
+    // listening yet -- only a real "error" means something's actually wrong.
+    if (s.error) {
+      spectrumWarn.textContent = 'Spectrum capture unavailable: ' + s.error;
       spectrumWarn.style.display = '';
     }
   }).catch(() => {});
 
-  const BAND_TABLE = [
-    [1.8, 2.0, '160'], [3.5, 4.0, '80'], [5.3, 5.4, '60'], [7.0, 7.3, '40'],
-    [10.1, 10.15, '30'], [14.0, 14.35, '20'], [18.068, 18.168, '17'],
-    [21.0, 21.45, '15'], [24.89, 24.99, '12'], [28.0, 29.7, '10'],
-    [50.0, 54.0, '6'], [70.0, 70.5, '2'], [144.0, 148.0, '70'],
-  ];
+  // -- Band-select buttons, driven by Frequencies-tab presets flagged
+  // "Remote" -- tunes the rig directly via rigctld (/radio/frequency)
+  // instead of clicking WSJT-X's own band button, per the user's own
+  // "move away from WSJT-X band buttons" direction. Fetched once on load;
+  // edit the Frequencies tab and reload this page to pick up changes.
+  let remoteBandPresets = [];
+
+  function loadRemoteBandPresets() {
+    fetch('/frequencies/presets').then(r => r.json()).then(d => {
+      remoteBandPresets = (d.presets || []).filter(p => p.remote);
+      bandRow.innerHTML = '';
+      if (remoteBandPresets.length === 0) {
+        bandRow.textContent = 'No presets flagged "Remote" -- add some on the Frequencies tab.';
+        return;
+      }
+      remoteBandPresets.forEach(p => {
+        const btn = document.createElement('button');
+        btn.className = 'band-btn';
+        btn.textContent = p.name;
+        btn.title = `${(p.freq_hz / 1e6).toFixed(6)} MHz`;
+        btn.dataset.freqHz = p.freq_hz;
+        btn.addEventListener('click', () => tuneToFreq(p.freq_hz));
+        bandRow.appendChild(btn);
+      });
+      updateBandHighlight();
+    }).catch(() => {});
+  }
+
+  function tuneToFreq(freqHz) {
+    postJson('/radio/frequency', { frequency_hz: freqHz }).then(d => {
+      if (!d.ok) { guiBridgeHint.textContent = d.error; guiBridgeHint.className = 'proc-hint err'; }
+    }).catch(e => { guiBridgeHint.textContent = String(e); guiBridgeHint.className = 'proc-hint err'; });
+  }
 
   function fmtTime(ms) {
     if (ms === null || ms === undefined) return '';
@@ -542,10 +583,11 @@
 
   function updateBandHighlight() {
     if (currentDialHz === null) return;
-    const mhz = currentDialHz / 1e6;
-    const match = BAND_TABLE.find(([lo, hi]) => mhz >= lo && mhz <= hi);
+    // Exact frequency match, not a band-wide one -- presets on the same
+    // band but different exact frequencies (e.g. B20M vs B20MC2) should
+    // only highlight the one actually in use.
     bandRow.querySelectorAll('.band-btn').forEach(btn => {
-      btn.classList.toggle('current', !!match && btn.textContent === match[2]);
+      btn.classList.toggle('current', Number(btn.dataset.freqHz) === currentDialHz);
     });
   }
 
@@ -585,7 +627,10 @@
     const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
     const ws = new WebSocket(proto + location.host + '/live/ws');
     currentWs = ws;
-    ws.onopen = () => { dot.className = 'dot up'; connText.textContent = 'connected'; };
+    ws.onopen = () => {
+      dot.className = 'dot up'; connText.textContent = 'connected';
+      updateSpectrumSubscription(); // re-establish on (re)connect
+    };
     ws.onclose = () => { dot.className = 'dot down'; connText.textContent = 'disconnected -- retrying...'; setTimeout(connect, 2000); };
     ws.onerror = () => ws.close();
     ws.onmessage = (msg) => {
@@ -620,7 +665,9 @@
 
   // -- GUI-scripting bridge (wsjtx_gui_bridge.py): drives WSJT-X's own
   // window directly for the few controls with no UDP equivalent -- Stop,
-  // Monitor, Decode, Enable Tx, Tune, and the band/mode buttons. Enable Tx/
+  // Monitor, Decode, Enable Tx, Tune, and the mode buttons (band buttons
+  // moved to direct rigctld control -- see loadRemoteBandPresets() below).
+  // Enable Tx/
   // Tune arm via a genuine HID-level click (see wsjtx_gui_bridge.py's
   // module docstring, 2026-07-16) and can take a few seconds with retries;
   // turning them off goes through the ordinary Halt Tx UDP path instead of
@@ -685,9 +732,7 @@
   guiEnableTx.addEventListener('change', () => guiSetCheckbox(guiEnableTx, 'Enable Tx'));
   guiTune.addEventListener('change', () => guiSetCheckbox(guiTune, 'Tune'));
 
-  bandRow.querySelectorAll('.band-btn').forEach(btn => {
-    btn.addEventListener('click', () => guiButtonClick(btn.textContent.trim()));
-  });
+  loadRemoteBandPresets();
 
   pollGuiStatus();
   setInterval(pollGuiStatus, 4000);
