@@ -526,6 +526,30 @@ def live_entities_view():
     return render_template("live_entities.html")
 
 
+# In-memory only (like cq_filter_enabled/my_call in live_config below) --
+# "remember on the server" here just means shared across browsers/tabs
+# rather than stuck in one browser's localStorage, not that it needs to
+# survive an app restart.
+_find_scan_state = {"bands": [], "tune_enabled": False, "loop": False}
+
+
+@live_bp.route("/live/find_config", methods=["GET", "POST"])
+def live_find_config():
+    """Persists the DX Monitor 'Find' box's band selection + tune/loop
+    toggles -- see templates/live_entities.html. Deliberately its own tiny
+    endpoint rather than folded into /live/config, since it's Find-widget
+    state, not a live-decode setting."""
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        if isinstance(body.get("bands"), list):
+            _find_scan_state["bands"] = [str(b) for b in body["bands"]]
+        if "tune_enabled" in body:
+            _find_scan_state["tune_enabled"] = bool(body["tune_enabled"])
+        if "loop" in body:
+            _find_scan_state["loop"] = bool(body["loop"])
+    return jsonify(_find_scan_state)
+
+
 @live_bp.route("/live/spectrum_status")
 def live_spectrum_status():
     # Local import to avoid a circular import -- audio_spectrum.py imports

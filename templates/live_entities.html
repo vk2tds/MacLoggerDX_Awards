@@ -42,7 +42,38 @@
   .status-worked { color: #e67e22; font-weight: 600; }
   .status-none { color: #c62828; }
   .status-unknown { color: inherit; }
+
+  .dx-find-box { border: 1px solid #ccc; border-radius: 6px; padding: 0.5rem 0.9rem 0.7rem; margin-bottom: 0.75rem; max-width: 46em; }
+  .dx-find-box legend { font-weight: 600; font-size: 0.9rem; padding: 0 0.3rem; }
+  .dx-find-bands { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; font-size: 0.85rem; margin-bottom: 0.5rem; }
+  .dx-find-bands label { display: flex; align-items: center; gap: 0.25rem; white-space: nowrap; }
+  .dx-find-controls { display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; flex-wrap: wrap; }
+  #find-status { color: #666; }
+  #find-cancel-btn:disabled, #find-scan-btn:disabled { opacity: 0.5; }
 </style>
+
+<fieldset class="dx-find-box">
+  <legend>Find</legend>
+  <div class="dx-find-bands">
+    <label><input type="checkbox" class="find-band" value="160"> 160</label>
+    <label><input type="checkbox" class="find-band" value="80"> 80</label>
+    <label><input type="checkbox" class="find-band" value="40"> 40</label>
+    <label><input type="checkbox" class="find-band" value="30"> 30</label>
+    <label><input type="checkbox" class="find-band" value="20"> 20</label>
+    <label><input type="checkbox" class="find-band" value="17"> 17</label>
+    <label><input type="checkbox" class="find-band" value="15"> 15</label>
+    <label><input type="checkbox" class="find-band" value="12"> 12</label>
+    <label><input type="checkbox" class="find-band" value="10"> 10</label>
+    <label><input type="checkbox" class="find-band" value="6"> 6</label>
+  </div>
+  <div class="dx-find-controls">
+    <label><input type="checkbox" id="find-tune-enabled"> Tune each band</label>
+    <label><input type="checkbox" id="find-loop"> Loop</label>
+    <button id="find-scan-btn" type="button">Scan</button>
+    <button id="find-cancel-btn" type="button" disabled>Cancel</button>
+    <span id="find-status"></span>
+  </div>
+</fieldset>
 
 <div class="dx-toolbar">
   <span id="dx-conn-dot"></span> <span id="dx-conn-text">connecting…</span>
@@ -345,6 +376,204 @@
   // disappears close to the 6h mark instead of lingering until whenever
   // the next unrelated decode happens to trigger a re-render.
   setInterval(renderAll, 5 * 60 * 1000);
+
+  // -- Find: scan a chosen set of bands, one at a time, via the same GUI
+  // bridge (wsjtx_gui_bridge.py, through wsjtx_remote.py's /remote/gui/*
+  // routes) the Remote tab uses for its band buttons and Tune checkbox --
+  // no new server-side control surface needed, just this page driving the
+  // existing one on a timer. Currently embedded here; may move to its own
+  // page later, per the user's own note when this was requested.
+  const findBandBoxes = document.querySelectorAll('.find-band');
+  const findTuneBox = document.getElementById('find-tune-enabled');
+  const findLoopBox = document.getElementById('find-loop');
+  const findScanBtn = document.getElementById('find-scan-btn');
+  const findCancelBtn = document.getElementById('find-cancel-btn');
+  const findStatus = document.getElementById('find-status');
+
+  function postJson(url, body) {
+    return fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}),
+    }).then(r => r.json());
+  }
+
+  function saveFindConfig() {
+    postJson('/live/find_config', {
+      bands: Array.from(findBandBoxes).filter(cb => cb.checked).map(cb => cb.value),
+      tune_enabled: findTuneBox.checked,
+      loop: findLoopBox.checked,
+    }).catch(() => {});
+  }
+  findBandBoxes.forEach(cb => cb.addEventListener('change', saveFindConfig));
+  findTuneBox.addEventListener('change', saveFindConfig);
+  findLoopBox.addEventListener('change', saveFindConfig);
+
+  fetch('/live/find_config').then(r => r.json()).then(cfg => {
+    const saved = new Set(cfg.bands || []);
+    findBandBoxes.forEach(cb => { cb.checked = saved.has(cb.value); });
+    findTuneBox.checked = !!cfg.tune_enabled;
+    findLoopBox.checked = !!cfg.loop;
+  }).catch(() => {});
+
+  let scanCancelled = false;
+
+  // Counts down real seconds, updating findStatus each tick; resolves
+  // early (with false) the moment Cancel is clicked, instead of finishing
+  // out the full wait -- Cancel needs to feel immediate, not wait 15-30s.
+  function wait(seconds, label) {
+    return new Promise(resolve => {
+      let remaining = seconds;
+      (function tick() {
+        if (scanCancelled) { resolve(false); return; }
+        findStatus.textContent = `${label} (${remaining}s)`;
+        if (remaining <= 0) { resolve(true); return; }
+        remaining--;
+        setTimeout(tick, 1000);
+      })();
+    });
+  }
+
+  // Waits until an absolute wall-clock deadline (ms since epoch) rather
+  // than a fixed duration -- needed to line the Tune burst up with WSJT-X's
+  // own 15s decode-cycle grid (real UTC :00/:15/:30/:45 boundaries). A live
+  // test showed the old "wait 5 real seconds after the band-switch click
+  // returns" approach starting Tune at e.g. 10:17:00 instead of 10:17:05,
+  // since that click's return time isn't grid-aligned at all.
+  function waitUntil(deadlineMs, label) {
+    return new Promise(resolve => {
+      (function tick() {
+        if (scanCancelled) { resolve(false); return; }
+        const remaining = Math.max(0, deadlineMs - Date.now());
+        findStatus.textContent = `${label} (${Math.ceil(remaining / 1000)}s)`;
+        if (remaining <= 0) { resolve(true); return; }
+        setTimeout(tick, Math.min(1000, remaining));
+      })();
+    });
+  }
+
+  const GRID_MS = 15000; // WSJT-X's own FT8 decode-cycle period
+
+  function nextGridBoundary(fromMs) {
+    const mod = fromMs % GRID_MS;
+    return mod === 0 ? fromMs : fromMs + (GRID_MS - mod);
+  }
+
+  async function clickBand(band) {
+    const d = await postJson('/remote/gui/button', { name: band });
+    if (!d.ok) throw new Error(d.error || `Failed to switch to ${band}m`);
+  }
+
+  async function setTune(on) {
+    const d = await postJson('/remote/gui/checkbox', { name: 'Tune', on });
+    if (!d.ok) throw new Error(d.error || `Failed to ${on ? 'enable' : 'disable'} Tune`);
+  }
+
+  async function runScan() {
+    const bands = Array.from(findBandBoxes).filter(cb => cb.checked).map(cb => cb.value);
+    if (bands.length === 0) { findStatus.textContent = 'Select at least one band first.'; return; }
+    const tuneEachBand = findTuneBox.checked;
+    const loopEnabled = findLoopBox.checked;
+    // Captured once, before the first band switch, so both a natural finish
+    // and a Cancel can put the radio back where it actually was -- not
+    // wherever "before" would mean after several loop passes.
+    const originalBand = currentBand ? currentBand.replace(/M$/, '') : null;
+
+    scanCancelled = false;
+    findScanBtn.disabled = true;
+    findCancelBtn.disabled = false;
+
+    let resultText;
+    try {
+      do {
+        for (const band of bands) {
+          if (scanCancelled) break;
+          // If we're already sitting on this band (tracked via WSJT-X's own
+          // Status broadcasts -- see applyStatus()/currentBand above), there's
+          // no antenna/tuner mismatch to correct, so skip the Tune burst even
+          // if "Tune each band" is checked. Read before clickBand() runs, so
+          // it reflects where we actually were, not wherever we're headed.
+          const alreadyOnBand = currentBand === (band + 'M');
+          const doTune = tuneEachBand && !alreadyOnBand;
+
+          findStatus.textContent = `${band}m: switching...`;
+          await clickBand(band);
+          if (scanCancelled) break;
+
+          if (tuneEachBand && alreadyOnBand) {
+            findStatus.textContent = `${band}m: already on this band -- skipping tune`;
+          }
+
+          if (doTune) {
+            // Tune burst pinned to seconds 5-10 of the *next* grid cycle, so
+            // "wait 5 seconds into the interval" means 5 real seconds into an
+            // actual WSJT-X decode cycle, not just 5 seconds after whenever
+            // clickBand() happened to return. Tune off always runs
+            // unconditionally, even if Cancel landed mid-burst (also
+            // backstopped by the Cancel button's own handler below).
+            const cycleStart = nextGridBoundary(Date.now());
+            const reached = await waitUntil(cycleStart + 5000, `${band}m: waiting to tune`);
+            if (reached && !scanCancelled) {
+              findStatus.textContent = `${band}m: tuning...`;
+              await setTune(true);
+              await waitUntil(cycleStart + 10000, `${band}m: tuning`);
+              await setTune(false);
+              // Ending the tune-off wait at cycleStart+15000 also happens to
+              // be the start of the next grid cycle -- "listen starts 5s
+              // after tuning completes" and "listen starts on a clean cycle
+              // boundary" are the same instant by construction.
+              await waitUntil(cycleStart + 15000, `${band}m: settling after tune`);
+            }
+            if (scanCancelled) break;
+          } else {
+            // No tune happened (toggle off, or already on this band) -- still
+            // snap forward to the next grid boundary before counting listen
+            // cycles, so "two complete intervals" means two real, aligned
+            // WSJT-X decode cycles rather than an arbitrary 30s window
+            // straddling partial ones.
+            const boundaryReached = await waitUntil(nextGridBoundary(Date.now()), `${band}m: waiting for next cycle`);
+            if (!boundaryReached || scanCancelled) break;
+          }
+
+          // Regardless of whether this band was tuned, always listen for two
+          // full 15s intervals before moving on.
+          const listened1 = await wait(15, `${band}m: listening (1/2)`);
+          if (!listened1 || scanCancelled) break;
+          const listened2 = await wait(15, `${band}m: listening (2/2)`);
+          if (!listened2 || scanCancelled) break;
+        }
+      } while (loopEnabled && !scanCancelled);
+      resultText = scanCancelled ? 'Scan cancelled.' : 'Scan complete.';
+    } catch (exc) {
+      resultText = `Scan stopped: ${exc.message}`;
+    } finally {
+      // Put the radio back where it actually was before Scan was pressed --
+      // for a normal finish as well as a Cancel, per the user's own request.
+      if (originalBand) {
+        findStatus.textContent = `${resultText} Restoring ${originalBand}m...`;
+        try {
+          await clickBand(originalBand);
+          findStatus.textContent = `${resultText} Back on ${originalBand}m.`;
+        } catch (exc) {
+          findStatus.textContent = `${resultText} (failed to restore ${originalBand}m: ${exc.message})`;
+        }
+      } else {
+        findStatus.textContent = resultText;
+      }
+      findScanBtn.disabled = false;
+      findCancelBtn.disabled = true;
+    }
+  }
+
+  findScanBtn.addEventListener('click', runScan);
+  findCancelBtn.addEventListener('click', () => {
+    scanCancelled = true;
+    findCancelBtn.disabled = true;
+    findStatus.textContent = 'Cancelling...';
+    // Belt-and-braces: turn Tune off immediately from here too, in case
+    // Cancel lands in some timing gap the loop's own cleanup doesn't
+    // catch -- leaving a live Tune running unattended is the one outcome
+    // that must never happen.
+    setTune(false).catch(() => {});
+  });
 })();
 </script>
 {% endblock %}

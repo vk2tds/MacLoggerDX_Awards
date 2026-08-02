@@ -198,6 +198,16 @@ _SEED_PRESETS = [
 ]
 
 
+# Which features a preset applies to -- shown as checkboxes on the
+# Frequencies tab (frequencies.py). "rigdial" is the only one any code
+# currently reads (see RigDial._cycle_preset below, for band_up/band_down/
+# cycle_presets); remote/find/radio are reserved for when the Remote and
+# Find (DX Monitor) tabs move away from driving WSJT-X's own band buttons
+# to select frequency and start reading this list instead -- not wired up
+# yet, per the user's own "not yet" when this was added.
+_USED_BY_DEFAULTS = {"remote": False, "find": False, "radio": False, "rigdial": False}
+
+
 class RigDialPresetStore:
     def __init__(self, path: str):
         self.path = path
@@ -206,17 +216,31 @@ class RigDialPresetStore:
     def _load_locked(self) -> list:
         if not os.path.exists(self.path):
             presets = [
-                {"id": i + 1, "name": name, "freq_hz": freq}
+                {"id": i + 1, "name": name, "freq_hz": freq,
+                 "remote": False, "find": False, "radio": False, "rigdial": True}
                 for i, (name, freq) in enumerate(_SEED_PRESETS)
             ]
             self._save(presets)
             return presets
         try:
             with open(self.path, "r") as f:
-                return json.load(f)
+                presets = json.load(f)
         except (OSError, json.JSONDecodeError):
             log.exception("Could not read %s", self.path)
             return []
+        # Migrate presets saved before the per-feature "used by" flags
+        # existed -- this store's only consumer at the time was RigDial's
+        # own band-cycling, so default rigdial=True for those (preserving
+        # existing behavior) and the other three False.
+        changed = False
+        for p in presets:
+            for key, default in {**_USED_BY_DEFAULTS, "rigdial": True}.items():
+                if key not in p:
+                    p[key] = default
+                    changed = True
+        if changed:
+            self._save(presets)
+        return presets
 
     def load(self) -> list:
         with self._lock:
@@ -232,12 +256,16 @@ class RigDialPresetStore:
         with self._lock:
             presets = self._load_locked()
             next_id = (max((p["id"] for p in presets), default=0)) + 1
-            preset = {"id": next_id, "name": name, "freq_hz": freq_hz}
+            preset = {"id": next_id, "name": name, "freq_hz": freq_hz, **_USED_BY_DEFAULTS}
             presets.append(preset)
             self._save(presets)
             return preset
 
-    def update(self, preset_id: int, name: Optional[str] = None, freq_hz: Optional[float] = None) -> Optional[dict]:
+    def update(
+        self, preset_id: int, name: Optional[str] = None, freq_hz: Optional[float] = None,
+        remote: Optional[bool] = None, find: Optional[bool] = None,
+        radio: Optional[bool] = None, rigdial: Optional[bool] = None,
+    ) -> Optional[dict]:
         with self._lock:
             presets = self._load_locked()
             for p in presets:
@@ -246,6 +274,14 @@ class RigDialPresetStore:
                         p["name"] = name
                     if freq_hz is not None:
                         p["freq_hz"] = freq_hz
+                    if remote is not None:
+                        p["remote"] = bool(remote)
+                    if find is not None:
+                        p["find"] = bool(find)
+                    if radio is not None:
+                        p["radio"] = bool(radio)
+                    if rigdial is not None:
+                        p["rigdial"] = bool(rigdial)
                     self._save(presets)
                     return p
             return None
@@ -485,7 +521,9 @@ class RigDial:
         setter(max(0.0, min(1.0, current + delta * 0.01)))
 
     def _cycle_preset(self, direction: int):
-        presets = self.preset_store.load()
+        # Only presets marked "RigDial" on the Frequencies tab -- see
+        # _USED_BY_DEFAULTS above.
+        presets = [p for p in self.preset_store.load() if p.get("rigdial")]
         if not presets:
             return
         self._preset_index = (self._preset_index + direction) % len(presets)

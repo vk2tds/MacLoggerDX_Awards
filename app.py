@@ -27,6 +27,7 @@ import macloggerdx_awards
 import awards_tree
 import audio_spectrum
 import dxcc_challenge
+import frequencies
 import live_monitor
 import logbook
 import qsl_helper
@@ -92,6 +93,7 @@ radio_control.init_radio_control(app, radio_control.RigctldConfig(
 ))
 
 rigdial.init_rigdial(app)
+frequencies.init_frequencies(app)
 
 logbook.init_logbook(app, analysis.database_name, analysis.qso_table)
 

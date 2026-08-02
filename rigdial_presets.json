@@ -2,111 +2,199 @@
   {
     "id": 1,
     "name": "B160M",
-    "freq_hz": 1840000
+    "freq_hz": 1840000,
+    "remote": true,
+    "find": true,
+    "radio": true,
+    "rigdial": true
   },
   {
     "id": 2,
     "name": "B160MC",
-    "freq_hz": 1836000
+    "freq_hz": 1836000,
+    "remote": false,
+    "find": false,
+    "radio": false,
+    "rigdial": true
   },
   {
     "id": 3,
     "name": "B80M",
-    "freq_hz": 3573000
+    "freq_hz": 3573000,
+    "remote": true,
+    "find": true,
+    "radio": true,
+    "rigdial": true
   },
   {
     "id": 4,
     "name": "B80MC2",
-    "freq_hz": 3570000
+    "freq_hz": 3570000,
+    "remote": false,
+    "find": false,
+    "radio": false,
+    "rigdial": true
   },
   {
     "id": 5,
     "name": "B40M",
-    "freq_hz": 7074000
+    "freq_hz": 7074000,
+    "remote": true,
+    "find": true,
+    "radio": true,
+    "rigdial": true
   },
   {
     "id": 6,
     "name": "B40MC2",
-    "freq_hz": 7056000
+    "freq_hz": 7056000,
+    "remote": false,
+    "find": false,
+    "radio": false,
+    "rigdial": true
   },
   {
     "id": 7,
     "name": "B30M",
-    "freq_hz": 10136000
+    "freq_hz": 10136000,
+    "remote": true,
+    "find": true,
+    "radio": true,
+    "rigdial": true
   },
   {
     "id": 8,
     "name": "B30MC3",
-    "freq_hz": 10140000
+    "freq_hz": 10140000,
+    "remote": false,
+    "find": false,
+    "radio": false,
+    "rigdial": true
   },
   {
     "id": 9,
     "name": "B20M",
-    "freq_hz": 14074000
+    "freq_hz": 14074000,
+    "remote": true,
+    "find": true,
+    "radio": true,
+    "rigdial": true
   },
   {
     "id": 10,
     "name": "B20MC2",
-    "freq_hz": 14098000
+    "freq_hz": 14098000,
+    "remote": true,
+    "find": true,
+    "radio": true,
+    "rigdial": true
   },
   {
     "id": 11,
     "name": "B17M",
-    "freq_hz": 18100000
+    "freq_hz": 18100000,
+    "remote": true,
+    "find": true,
+    "radio": true,
+    "rigdial": true
   },
   {
     "id": 12,
     "name": "B17MC",
-    "freq_hz": 18095000
+    "freq_hz": 18095000,
+    "remote": true,
+    "find": true,
+    "radio": true,
+    "rigdial": true
   },
   {
     "id": 13,
     "name": "B17MC2",
-    "freq_hz": 18090000
+    "freq_hz": 18090000,
+    "remote": true,
+    "find": true,
+    "radio": true,
+    "rigdial": true
   },
   {
     "id": 14,
     "name": "B15M",
-    "freq_hz": 21074000
+    "freq_hz": 21074000,
+    "remote": true,
+    "find": true,
+    "radio": true,
+    "rigdial": true
   },
   {
     "id": 15,
     "name": "B15MC2",
-    "freq_hz": 21085000
+    "freq_hz": 21085000,
+    "remote": false,
+    "find": false,
+    "radio": false,
+    "rigdial": true
   },
   {
     "id": 16,
     "name": "B12M",
-    "freq_hz": 24915000
+    "freq_hz": 24915000,
+    "remote": true,
+    "find": true,
+    "radio": true,
+    "rigdial": true
   },
   {
     "id": 17,
     "name": "B12MC2",
-    "freq_hz": 24918000
+    "freq_hz": 24918000,
+    "remote": false,
+    "find": false,
+    "radio": false,
+    "rigdial": true
   },
   {
     "id": 18,
     "name": "B10M",
-    "freq_hz": 28074000
+    "freq_hz": 28074000,
+    "remote": true,
+    "find": true,
+    "radio": true,
+    "rigdial": true
   },
   {
     "id": 19,
     "name": "B10MC",
-    "freq_hz": 28090000
+    "freq_hz": 28090000,
+    "remote": false,
+    "find": false,
+    "radio": false,
+    "rigdial": true
   },
   {
     "id": 20,
     "name": "B10MC2",
-    "freq_hz": 28085000
+    "freq_hz": 28085000,
+    "remote": false,
+    "find": false,
+    "radio": false,
+    "rigdial": true
   },
   {
     "id": 21,
     "name": "B6M",
-    "freq_hz": 50313000
+    "freq_hz": 50313000,
+    "remote": true,
+    "find": true,
+    "radio": true,
+    "rigdial": true
   },
   {
     "id": 22,
     "name": "B6MC",
-    "freq_hz": 50331000
+    "freq_hz": 50331000,
+    "remote": true,
+    "find": true,
+    "radio": true,
+    "rigdial": true
   }
 ]
