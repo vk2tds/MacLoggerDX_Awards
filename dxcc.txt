@@ -151,14 +151,14 @@ Notes:
     FT/Z               Amsterdam & St. Paul Is.           AF    68    39    010
     FW                 Wallis & Futuna Is.                OC    62    32    298
     FY                 French Guiana                      SA    12    09    063
-    G   	       United Kingdom of Great Britain    EU    27    14    223    
-                       and Northern Ireland 
-    GD,GT              Isle of Man                        EU    27    14    114
-    GI,GN              Northern Ireland                   EU    27    14    265
-    GJ,GH              Jersey                             EU    27    14    122
-    GM,GS              Scotland                           EU    27    14    279
-    GU,GP              Guernsey                           EU    27    14    106
-    GW,GC              Wales                              EU    27    14    294
+    G,M,2E             United Kingdom of Great Britain    EU    27    14    223
+                       and Northern Ireland
+    GD,GT,MD,2D        Isle of Man                        EU    27    14    114
+    GI,GN,MI,2I        Northern Ireland                   EU    27    14    265
+    GJ,GH,MJ,2J        Jersey                             EU    27    14    122
+    GM,GS,MM,2M        Scotland                           EU    27    14    279
+    GU,GP,MU,2U        Guernsey                           EU    27    14    106
+    GW,GC,MW,2W        Wales                              EU    27    14    294
     H4                 Solomon Is.                        OC    51    28    185
     H40(18)            Temotu Province                    OC    51    32    507
     HA,HG              Hungary                            EU    28    15    239

@@ -12,6 +12,9 @@
   Entities disappear after 3 hours with no activity. Filter to Everything / Current band / Current
   band + frequency; Clear removes only what the current filter shows -- WSJT-X's own Erase doesn't
   touch this screen, since this is meant to keep a longer history than the live decode window does.
+  Double-click a callsign to call it -- retunes the radio to the frequency it was last heard on first,
+  if the radio isn't already there, then replies exactly as double-clicking that decode in WSJT-X
+  itself would.
 </p>
 
 <style>
@@ -23,11 +26,13 @@
   .dx-filter-group { display: flex; gap: 0.75rem; font-size: 0.85rem; }
   .dx-filter-group label { display: flex; align-items: center; gap: 0.25rem; white-space: nowrap; }
   #dx-current { margin-left: auto; font-size: 0.78rem; color: #666; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+  #dx-call-status { font-size: 0.78rem; color: #666; white-space: nowrap; }
   #dx-clear-btn { font-size: 0.8rem; padding: 0.25rem 0.7rem; }
 
   .dx-group { border: 1px solid #ccc; border-radius: 6px; padding: 0.5rem 0.85rem; margin-bottom: 0.5rem; max-width: 46em; }
   .dx-header { font-weight: 600; font-size: 0.95rem; margin-bottom: 0.3rem; border-bottom: 1px solid #eee; padding-bottom: 0.25rem; }
-  .dx-call-row { display: flex; align-items: center; gap: 1rem; font-size: 0.85rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; padding: 0.1rem 0; }
+  .dx-call-row { display: flex; align-items: center; gap: 1rem; font-size: 0.85rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; padding: 0.1rem 0; cursor: pointer; border-radius: 3px; }
+  .dx-call-row:hover { background: #f2f2f2; }
   .dx-call { min-width: 8em; }
   .dx-snr { min-width: 4em; color: #555; }
   .dx-time { color: #888; }
@@ -72,6 +77,7 @@
   </span>
   <button id="dx-clear-btn" type="button">Clear</button>
   <span id="dx-current"></span>
+  <span id="dx-call-status"></span>
 </div>
 
 <div id="dx-entities"></div>
@@ -240,17 +246,28 @@
     }
     group.entity_status = ev.entity_status;
     group.lastTime = ev.time_ms;
-    group.lastSeenWallClock = Date.now();
-    const now = Date.now();
+    // Use the server's real wall-clock stamp when present (both live decodes
+    // and /live/history replay carry it) instead of Date.now(), so a
+    // replayed historical decode is aged correctly instead of always looking
+    // like it just happened -- that was the actual cause of entities/boxes
+    // losing their history on a page reload (see
+    // project_live_history_buffer_size). Falls back to Date.now() only for
+    // events from before this field existed.
+    const wallClock = ev.received_epoch_ms ?? Date.now();
+    group.lastSeenWallClock = Math.max(group.lastSeenWallClock ?? 0, wallClock);
     const prevInfo = group.calls.get(ev.call);
     const decodeTimes = (prevInfo && prevInfo.decodeTimes) || [];
-    decodeTimes.push(now);
+    decodeTimes.push(wallClock);
     // Prune this call's own history to the same 6h window as the entity
     // timeout, so it doesn't grow unbounded for a call heard continuously.
+    const now = Date.now();
     while (decodeTimes.length && now - decodeTimes[0] > TIMEOUT_MS) decodeTimes.shift();
     group.calls.set(ev.call, {
       snr: ev.snr, time_ms: ev.time_ms, call_status: ev.call_status, decodeTimes,
       band: ev.band, dial_frequency_hz: ev.dial_frequency_hz,
+      // Full decode event, kept so a double-click can tune+reply exactly as
+      // Remote/Live Monitor's double-click-to-call does -- see tuneAndCall().
+      rawEvent: ev,
     });
     if (group.calls.size > 3) {
       let oldestCall = null, oldestTime = Infinity;
@@ -307,7 +324,7 @@
           <span class="dx-box" style="background:${activityColor(b.count)}" title="${b.label}: ${b.count} decode${b.count === 1 ? '' : 's'}"></span>
         `).join('');
         return `
-        <div class="dx-call-row">
+        <div class="dx-call-row" data-entity="${escapeHtml(name)}" data-call="${escapeHtml(call)}" title="Double-click to tune + call ${escapeHtml(call)}">
           <span class="dx-call ${statusClass(info.call_status && info.call_status.band)}">${escapeHtml(call)}</span>
           <span class="dx-snr">${info.snr ?? ''} dB</span>
           <span class="dx-time">${fmtTime(info.time_ms)}</span>
@@ -330,9 +347,12 @@
       : `<p class="dx-empty">Nothing matches this filter${currentBand ? '' : ' (waiting for WSJT-X status to know the current band)'}.</p>`;
   }
 
+  let currentWs = null;
+
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
     const ws = new WebSocket(proto + location.host + '/live/ws');
+    currentWs = ws;
     ws.onopen = () => { dot.className = 'up'; connText.textContent = 'connected'; };
     ws.onclose = () => { dot.className = 'down'; connText.textContent = 'disconnected -- retrying...'; setTimeout(connect, 2000); };
     ws.onerror = () => ws.close();
@@ -346,6 +366,49 @@
       else if (ev.kind === 'status') { applyStatus(ev); renderAll(); }
     };
   }
+
+  // -- Double-click a callsign row: tune the radio to where it was last
+  // heard (if not already there), then call it exactly as double-clicking
+  // that decode inside WSJT-X itself would (same /live/ws 'reply' action
+  // Remote/Live Monitor use -- see live_monitor.py's handle_reply_action).
+  const callStatus = document.getElementById('dx-call-status');
+
+  function sendReply(ev) {
+    if (!currentWs || currentWs.readyState !== WebSocket.OPEN) return;
+    currentWs.send(JSON.stringify({ action: 'reply', event: ev }));
+    callStatus.textContent = `Calling ${ev.call || ''}...`;
+  }
+
+  async function tuneAndCall(ev) {
+    const targetHz = ev.dial_frequency_hz;
+    if (targetHz != null && targetHz !== currentDialHz) {
+      callStatus.textContent = `Tuning to ${(targetHz / 1e6).toFixed(6)}...`;
+      try {
+        await fetch('/radio/frequency', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ frequency_hz: targetHz }),
+        });
+      } catch (e) {
+        callStatus.textContent = `Tune failed: ${e}`;
+        return;
+      }
+      // Give WSJT-X a moment to see the new dial frequency (via its own CAT
+      // poll) before telling it to call -- a short fixed wait rather than
+      // polling for an exact currentDialHz match, since small rounding/CAT
+      // -poll-timing differences shouldn't block the call indefinitely.
+      await new Promise(r => setTimeout(r, 1500));
+    }
+    sendReply(ev);
+  }
+
+  container.addEventListener('dblclick', (e) => {
+    const row = e.target.closest('.dx-call-row');
+    if (!row) return;
+    const group = entities.get(row.dataset.entity);
+    const info = group && group.calls.get(row.dataset.call);
+    if (!info || !info.rawEvent) return;
+    tuneAndCall(info.rawEvent);
+  });
 
   fetch('/live/config').then(r => r.json()).then(data => {
     if (data.wsjtx_status && Object.keys(data.wsjtx_status).length) { applyStatus(data.wsjtx_status); renderAll(); }

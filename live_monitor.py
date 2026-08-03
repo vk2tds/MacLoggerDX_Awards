@@ -380,6 +380,13 @@ class LiveMonitor:
 
         event = {
             "kind": "decode",
+            # Real wall-clock time this decode was received, in epoch ms. Distinct
+            # from time_ms (WSJT-X's own ms-since-midnight-UTC field, unusable for
+            # elapsed-time math across a day boundary or a page reload). Clients
+            # replaying /live/history use this to compute a decode's true age
+            # instead of stamping Date.now() (which made every replayed event
+            # look like it just happened -- see project_live_history_buffer_size).
+            "received_epoch_ms": int(time.time() * 1000),
             "time_ms": fields.get("time_ms"),
             "snr": fields.get("snr"),
             "delta_freq_hz": fields.get("delta_freq_hz"),
@@ -565,10 +572,14 @@ def live_entities_view():
     return render_template("live_entities.html")
 
 
-# In-memory only (like cq_filter_enabled/my_call in live_config below) --
-# "remember on the server" here just means shared across browsers/tabs
-# rather than stuck in one browser's localStorage, not that it needs to
-# survive an app restart.
+# Disk-backed (JSON file, same convention as rigdial_presets.json/
+# rigdial_config.json etc.) so a selection survives an app restart -- it
+# used to be in-memory only, which meant it looked like it "went missing on
+# refresh" any time the process happened to have restarted since it was last
+# saved (e.g. Flask's debug-mode auto-reloader restarting on every code
+# change during active development, or the process crashing/being
+# relaunched) -- the browser refresh itself was never actually the cause,
+# just the moment the loss became visible.
 #
 # preset_ids used to be "bands" (WSJT-X band-button label strings, e.g.
 # "20") -- renamed once Find moved from clicking WSJT-X's own band buttons
@@ -576,7 +587,33 @@ def live_entities_view():
 # "find" (see templates/live_entities.html), since entries are now preset
 # ids, not band labels. Any old "bands" selection is simply not carried
 # forward -- this is a small convenience cache, not data worth migrating.
+_FIND_SCAN_STATE_FILE = "find_scan_config.json"
 _find_scan_state = {"preset_ids": [], "tune_enabled": False, "loop": False}
+
+
+def _load_find_scan_state():
+    try:
+        with open(_FIND_SCAN_STATE_FILE, "r", encoding="utf-8") as f:
+            saved = json.load(f)
+    except (OSError, ValueError):
+        return
+    if isinstance(saved.get("preset_ids"), list):
+        _find_scan_state["preset_ids"] = [str(b) for b in saved["preset_ids"]]
+    if "tune_enabled" in saved:
+        _find_scan_state["tune_enabled"] = bool(saved["tune_enabled"])
+    if "loop" in saved:
+        _find_scan_state["loop"] = bool(saved["loop"])
+
+
+def _save_find_scan_state():
+    try:
+        with open(_FIND_SCAN_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(_find_scan_state, f, indent=2)
+    except OSError:
+        log.warning("Could not save %s", _FIND_SCAN_STATE_FILE, exc_info=True)
+
+
+_load_find_scan_state()
 
 
 @live_bp.route("/live/find_config", methods=["GET", "POST"])
@@ -587,12 +624,18 @@ def live_find_config():
     state, not a live-decode setting."""
     if request.method == "POST":
         body = request.get_json(silent=True) or {}
+        changed = False
         if isinstance(body.get("preset_ids"), list):
             _find_scan_state["preset_ids"] = [str(b) for b in body["preset_ids"]]
+            changed = True
         if "tune_enabled" in body:
             _find_scan_state["tune_enabled"] = bool(body["tune_enabled"])
+            changed = True
         if "loop" in body:
             _find_scan_state["loop"] = bool(body["loop"])
+            changed = True
+        if changed:
+            _save_find_scan_state()
     return jsonify(_find_scan_state)
 
 

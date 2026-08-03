@@ -53,6 +53,7 @@ th, td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; }
 }
 .refreshed { color: var(--muted); font-size: 0.85rem; }
 .version { color: var(--muted); font-size: 0.8rem; margin-left: 0.5rem; }
+.utc-clock { color: var(--fg); font-size: 0.85rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin-left: 0.75rem; white-space: nowrap; }
 
 .flashes { list-style: none; margin: 0; padding: 0.5rem 1.5rem; background: #fff3cd; color: #664d03; }
 

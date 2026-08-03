@@ -5,4 +5,5 @@ alltxt_cache.sqlite
 radio_process_state.json
 rigctld.log
 qso_queue.json
+find_scan_config.json
 

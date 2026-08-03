@@ -40,7 +40,7 @@ def test_expand_digit_prefixed_range():
 
 def test_resolver_loads_fixture():
     r = DxccResolver(FIXTURE)
-    assert len(r.entities) == 12
+    assert len(r.entities) == 13
 
 
 def test_lookup_japan_digit_prefixed_range_not_nicaragua():
@@ -144,3 +144,14 @@ def test_lookup_kg4_one_or_three_letter_suffix_is_usa():
     r = DxccResolver(FIXTURE)
     assert r.lookup("KG4OJT").name == "United States of America"
     assert r.lookup("KG4A").name == "United States of America"
+
+
+def test_lookup_uk_modern_m_and_2e_prefixes():
+    # Regression: M0UOO (IO90, real-world England station) resolved to no
+    # entity at all -- the raw ARRL dxcc.txt only lists "G" for England,
+    # missing the modern second-generation "M0"/"2E0" etc. callsign blocks
+    # issued since 2003. Fixed by adding M/2E to dxcc.txt's prefix field.
+    r = DxccResolver(FIXTURE)
+    assert r.lookup("M0UOO").name == "United Kingdom of Great Britain"
+    assert r.lookup("2E0ABC").name == "United Kingdom of Great Britain"
+    assert r.lookup("G0ABC").name == "United Kingdom of Great Britain"

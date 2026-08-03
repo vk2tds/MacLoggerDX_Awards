@@ -27,7 +27,20 @@
     <span class="refreshed">Last refreshed {{ last_refreshed.strftime('%Y-%m-%d %H:%M:%S') }} UTC</span>
   {% endif %}
   <span class="version">v{{ app_version }}</span>
+  <span class="utc-clock" id="utc-clock"></span>
 </nav>
+<script>
+  (function () {
+    const el = document.getElementById('utc-clock');
+    function tick() {
+      const now = new Date();
+      const pad = n => String(n).padStart(2, '0');
+      el.textContent = `${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}:${pad(now.getUTCSeconds())} UTC`;
+    }
+    tick();
+    setInterval(tick, 1000);
+  })();
+</script>
 {% with messages = get_flashed_messages() %}
   {% if messages %}
     <ul class="flashes">
