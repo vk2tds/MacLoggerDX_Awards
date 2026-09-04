@@ -28,5 +28,15 @@
     "dxcc_country": "Malta",
     "qso_start_str": "2023-04-18 16:43",
     "marked": "2026-07-15T15:28:07"
+  },
+  {
+    "key": "IS0AFM|30M|FT8|1782278686",
+    "call": "IS0AFM",
+    "band": "30M",
+    "mode": "FT8",
+    "qso_start": 1782278686,
+    "dxcc_country": "Sardinia",
+    "qso_start_str": "2026-06-24 05:24",
+    "marked": "2026-08-29T08:38:14"
   }
 ]

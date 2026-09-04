@@ -102,6 +102,33 @@ def _first_worked_times() -> tuple:
     return first_dxcc, first_band
 
 
+def _first_confirmed_times() -> tuple:
+    """Like _first_worked_times(), but restricted to QSOs that were actually
+    confirmed (LoTW or CardC). Used by recent_confirmations() -- an earlier,
+    never-confirmed QSO with the same DXCC/band shouldn't block a *later*
+    QSO's confirmation from counting as a fresh NEW DXCC/BAND achievement,
+    since an unconfirmed contact earns no award credit. Real example that
+    surfaced this: VR2CU's 2023-04-20 Hong Kong 12M QSO was never confirmed
+    (qsl_received empty); VR2VGM's later 2023-11-02 Hong Kong 12M QSO got
+    LoTW-confirmed and should show NEW BAND, but _first_worked_times() (any
+    QSO, confirmed or not) picked VR2CU's earlier attempt as "first" and
+    suppressed the badge."""
+    dxcc_rows = _execute(
+        f"SELECT dxcc_id, MIN(qso_start) FROM {_qso_table} "
+        f"WHERE dxcc_id IS NOT NULL AND (qsl_received LIKE '%LoTW%' OR qsl_received LIKE '%CardC%') "
+        f"GROUP BY dxcc_id"
+    )
+    band_rows = _execute(
+        f"SELECT dxcc_id, band_tx, MIN(qso_start) FROM {_qso_table} "
+        f"WHERE dxcc_id IS NOT NULL AND band_tx IS NOT NULL "
+        f"AND (qsl_received LIKE '%LoTW%' OR qsl_received LIKE '%CardC%') "
+        f"GROUP BY dxcc_id, band_tx"
+    )
+    first_dxcc = {r[0]: r[1] for r in dxcc_rows}
+    first_band = {(r[0], r[1]): r[2] for r in band_rows}
+    return first_dxcc, first_band
+
+
 def _qsos_in_range(start_epoch: float, end_epoch: float, limit: int) -> list:
     rows = _execute(
         f"SELECT call, band_tx, band_rx, mode, qso_start, qso_done, grid, dxcc_country, "
@@ -143,11 +170,19 @@ def qsos_for_month(year: int, month: int, limit: int = 2000) -> list:
 def recent_confirmations(months: float = 3, limit: int = 500) -> list:
     cutoff_date = time.strftime("%Y%m%d", time.gmtime(time.time() - months * 30 * 86400))
     rows = _execute(
-        f"SELECT call, band_tx, dxcc_country, mode, qso_start, qsl_received FROM {_qso_table} "
+        f"SELECT call, band_tx, dxcc_country, mode, qso_start, qsl_received, dxcc_id FROM {_qso_table} "
         f"WHERE qsl_received LIKE '%LoTW%' OR qsl_received LIKE '%CardC%'"
     )
+    # Deliberately _first_confirmed_times(), NOT _first_worked_times() --
+    # this table is about award-worthy confirmations, so "new DXCC/band"
+    # here means "first *confirmed* contact", not "first attempted contact
+    # regardless of outcome" (Recent QSOs uses the latter, which is the
+    # right question to ask at log time, before you know if it'll ever be
+    # confirmed). See _first_confirmed_times()'s docstring for the real
+    # example (Hong Kong 12M) that surfaced this distinction mattering.
+    first_dxcc, first_band = _first_confirmed_times()
     results = []
-    for call, band_tx, dxcc_country, mode, qso_start, qsl_received in rows:
+    for call, band_tx, dxcc_country, mode, qso_start, qsl_received, dxcc_id in rows:
         tags = _CONFIRM_TAG_RE.findall(qsl_received or "")
         if not tags:
             continue
@@ -158,6 +193,8 @@ def recent_confirmations(months: float = 3, limit: int = 500) -> list:
             "call": call, "band_tx": band_tx, "dxcc_country": dxcc_country, "mode": mode,
             "qso_start": qso_start, "confirmed_date": confirmed_date,
             "confirmed_via": "LoTW" if via.upper() == "LOTW" else "Card",
+            "is_new_dxcc": dxcc_id is not None and first_dxcc.get(dxcc_id) == qso_start,
+            "is_new_band": dxcc_id is not None and band_tx is not None and first_band.get((dxcc_id, band_tx)) == qso_start,
         })
     results.sort(key=lambda r: r["confirmed_date"], reverse=True)
     return results[:limit]
@@ -213,6 +250,16 @@ def init_logbook(app, database_path: str, qso_table: str):
 @logbook_bp.route("/logbook")
 def logbook_view():
     return render_template("logbook.html")
+
+
+@logbook_bp.route("/logbook/widget/recent")
+def logbook_widget_recent():
+    return render_template("logbook_widget.html", widget_mode="recent")
+
+
+@logbook_bp.route("/logbook/widget/confirmations")
+def logbook_widget_confirmations():
+    return render_template("logbook_widget.html", widget_mode="confirmations")
 
 
 @logbook_bp.route("/logbook/recent")

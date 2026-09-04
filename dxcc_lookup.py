@@ -49,17 +49,26 @@ DEFAULT_DXCC_URI = "http://www.arrl.org/files/file/DXCC/2019_Current_Deleted(3).
 # European Russia and Asiatic Russia are a genuinely irregular case the
 # generic literal/range model below can't express: both entities' prefix
 # fields are "UA-UI1-7,RA-RZ" / "UA-UI8-0,RA-RZ" -- the SAME "RA-RZ" range
-# (and, once expanded, the same bare "UA"/"UI" literals too), with only a
-# trailing call-area digit (1-7 = European, 8/9/0 = Asiatic) actually
-# distinguishing them. Confirmed live (2026-07-25): with only the generic
-# rules, European Russia's identical range always won ties (first-loaded-
-# wins), so e.g. RA9ABC/UA9ABC/RZ0ABC -- all genuinely Asiatic by call area
-# -- silently resolved to European Russia, and bare "R"+digit calls like
-# R7DX didn't resolve at all (no token covers that shorter form). Handled
-# as its own special case in DxccResolver rather than stretched to fit
-# PrefixRule -- confirmed no other entity in dxcc.txt uses R/UA/UI as a
-# prefix root, so this can't misfire on anything else.
-_RUSSIA_CALL_AREA_RE = re.compile(r"^(?:UA|UI|R[A-Z]?)([0-9])")
+# and the SAME "UA-UI" range (all of UA/UB/UC/UD/UE/UF/UG/UH/UI, not just
+# the two endpoints), with only a trailing call-area digit (1-7 = European,
+# 8/9/0 = Asiatic) actually distinguishing them. Confirmed live
+# (2026-07-25): with only the generic rules, European Russia's identical
+# range always won ties (first-loaded-wins), so e.g. RA9ABC/UA9ABC/RZ0ABC
+# -- all genuinely Asiatic by call area -- silently resolved to European
+# Russia, and bare "R"+digit calls like R7DX didn't resolve at all (no
+# token covers that shorter form). Handled as its own special case in
+# DxccResolver rather than stretched to fit PrefixRule -- confirmed no
+# other entity in dxcc.txt uses R/U[A-I] as a prefix root, so this can't
+# misfire on anything else.
+#
+# Regression (live 2026-08-30): the first fix here only ever matched the
+# literal strings "UA"/"UI", not the full "UA-UI" range between them --
+# UB0IBA, UC6D, UD6X, UF1A and dozens more genuinely-Russian calls using
+# the B-H letters in that range were quietly falling through as
+# unresolved DXCC (surfaced via the new "Unknown DXCC callsigns" auto-log
+# on DXCC Status -- a large, sustained cluster of U[B-F]-prefixed calls
+# was the tell that this was a real data gap, not noise).
+_RUSSIA_CALL_AREA_RE = re.compile(r"^(?:U[A-I]|R[A-Z]?)([0-9])")
 _RUSSIA_EUROPEAN_AREAS = set("1234567")
 
 # KG4 is a genuinely irregular ARRL special case, not expressible via the
@@ -71,6 +80,40 @@ _RUSSIA_EUROPEAN_AREAS = set("1234567")
 # suffix, grid FM18 -- mainland Virginia/NC, nowhere near Cuba) was
 # misresolving to Guantanamo Bay under the naive longest-prefix match.
 _KG4_RE = re.compile(r"^KG4([A-Z]+)$")
+
+# VK0 is a genuinely irregular case dxcc.txt can't express by prefix alone:
+# Heard I. and Macquarie I. both list the literal prefix "VK0#" (identical),
+# and Antarctica's own prefix field footnote explicitly lists VK0 as one of
+# many home-country prefixes used by Antarctic research stations too --
+# three different DXCC entities share the same callsign prefix, correctly
+# disambiguated by ARRL rule only by *where the station actually is*.
+# Confirmed live 2026-08-16: VK0DS decoded with grid MC81 (~68.5S 78E, right
+# at Davis Station) was resolving to "Heard I." (an arbitrary first-listed
+# tie-break) when it's really an Australian Antarctic Territory station --
+# genuinely Antarctica, nowhere near either island. Grid square gives real
+# lat/lon, so use it: south of the Antarctic Treaty's 60S boundary (which is
+# also literally ARRL's own boundary for the Antarctica DXCC entity,
+# regardless of prefix) -> Antarctica; otherwise Heard I. (~73E) vs
+# Macquarie I. (~159E) are far enough apart in longitude to tell apart
+# cleanly. No grid, or a grid outside all three expected ranges -> keep the
+# pre-existing default (Heard I.) rather than guessing further.
+_VK0_ANTARCTICA_MAX_LAT = -60.0
+_VK0_HEARD_LON_RANGE = (60.0, 90.0)
+_VK0_MACQUARIE_LON_RANGE = (145.0, 170.0)
+_GRID_RE = re.compile(r"^([A-R])([A-R])(\d)(\d)")
+
+
+def _grid_to_latlon(grid: Optional[str]):
+    """Approximate center point of a 4-character Maidenhead grid square."""
+    if not grid:
+        return None
+    m = _GRID_RE.match(grid.upper())
+    if not m:
+        return None
+    lon_field, lat_field, lon_sq, lat_sq = m.groups()
+    lon = (ord(lon_field) - ord("A")) * 20 - 180 + int(lon_sq) * 2 + 1
+    lat = (ord(lat_field) - ord("A")) * 10 - 90 + int(lat_sq) * 1 + 0.5
+    return (lat, lon)
 
 
 @dataclasses.dataclass
@@ -227,9 +270,22 @@ class DxccResolver:
         self._guantanamo = next((e for e in self.entities if e.name == "Guantanamo Bay"), None)
         guantanamo_entities = {id(self._guantanamo)} if self._guantanamo is not None else set()
 
+        # See the VK0 comment above -- Heard I./Macquarie I. share an
+        # identical "VK0#" prefix token, resolved by grid in lookup()
+        # instead, so skip both here rather than leaving an arbitrary
+        # first-listed-wins tie in the generic rules.
+        self._heard = next((e for e in self.entities if e.name == "Heard I."), None)
+        self._macquarie = next((e for e in self.entities if e.name == "Macquarie I."), None)
+        self._antarctica = next((e for e in self.entities if e.name == "Antarctica"), None)
+        vk0_entities = (
+            {id(self._heard), id(self._macquarie)}
+            if self._heard is not None and self._macquarie is not None
+            else set()
+        )
+
         self.rules: list = []
         for ent in self.entities:
-            if id(ent) in russia_entities or id(ent) in guantanamo_entities:
+            if id(ent) in russia_entities or id(ent) in guantanamo_entities or id(ent) in vk0_entities:
                 continue
             for tok in _expand_prefix_field(ent.prefix_field):
                 if tok[0] == "literal":
@@ -240,8 +296,11 @@ class DxccResolver:
         self.rules.sort(key=lambda r: len(r.literal) if r.literal else 0, reverse=True)
         log.info("DXCC resolver loaded %d entities, %d prefix rules", len(self.entities), len(self.rules))
 
-    def lookup(self, callsign: str) -> Optional[Entity]:
-        """Best-effort longest-prefix-match lookup. Returns None if unsure."""
+    def lookup(self, callsign: str, grid: Optional[str] = None) -> Optional[Entity]:
+        """Best-effort longest-prefix-match lookup. Returns None if unsure.
+        `grid` (the decode's Maidenhead grid square, if any) only feeds the
+        VK0 special case below -- every other entity is resolved by prefix
+        alone."""
         if not callsign:
             return None
         call = callsign.strip().upper()
@@ -265,6 +324,20 @@ class DxccResolver:
             # else: fall through to the generic rules below, which correctly
             # resolve non-2-letter-suffix KG4 calls to USA via its own "K"
             # literal (Guantanamo's "KG4" rule was excluded above).
+
+        if base.startswith("VK0") and self._heard and self._macquarie:
+            latlon = _grid_to_latlon(grid)
+            if latlon:
+                lat, lon = latlon
+                if lat <= _VK0_ANTARCTICA_MAX_LAT and self._antarctica:
+                    return self._antarctica
+                if _VK0_HEARD_LON_RANGE[0] <= lon <= _VK0_HEARD_LON_RANGE[1]:
+                    return self._heard
+                if _VK0_MACQUARIE_LON_RANGE[0] <= lon <= _VK0_MACQUARIE_LON_RANGE[1]:
+                    return self._macquarie
+            # No grid, or a grid outside all three expected ranges -- can't
+            # disambiguate further, keep the pre-existing default.
+            return self._heard
 
         best = None
         best_len = -1

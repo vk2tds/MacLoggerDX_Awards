@@ -1,0 +1,9 @@
+{% extends "base_widget.html" %}
+{% block title %}Remote: {{ {'band_activity': 'Band Activity', 'rx_freq': 'Rx Frequency', 'waterfall': 'Waterfall', 'rest': 'Controls'}[widget_mode] }}{% endblock %}
+{% block body_attrs %} data-widget-mode="{{ widget_mode }}"{% endblock %}
+{% block content %}
+{% include "_wsjtx_remote_body.html" %}
+<script src="{{ url_for('static', filename='waterfall.js') }}"></script>
+<script src="{{ url_for('static', filename='spectrum_waterfall.js') }}"></script>
+<script src="{{ url_for('static', filename='wsjtx_remote.js') }}"></script>
+{% endblock %}

@@ -61,12 +61,14 @@ def load_tracking():
 
 def _cell_status_and_tooltip(value, country, band, tracking):
     """Mirrors the historical challengeTableCell()/TableModel logic: decide the
-    background status for a DXCC/band cell and build its tooltip."""
+    background status for a DXCC/band cell and build its tooltip. Also returns
+    the raw LoTW/Card/QSO counts (0/0/0 for a blank cell) so callers can total
+    them up without re-parsing the value string a second time."""
     if value == '-' or value is None:
-        return Status.NULL, '', ''
+        return Status.NULL, '', '', 0, 0, 0
 
     first_line = value.split('\r\n', 1)[0]
-    lotw, card, qso = first_line.split('/', 2)
+    lotw, card, qso = (int(n) for n in first_line.split('/', 2))
     text = '%s/%s' % (lotw, qso)
 
     tooltip = ''
@@ -74,7 +76,7 @@ def _cell_status_and_tooltip(value, country, band, tracking):
         tooltip += '<div style="color:green;">Cards: %s</div>' % card
 
     if int(card) > 0 and int(lotw) == 0:
-        return Status.QSL_CARD, text, tooltip
+        return Status.QSL_CARD, text, tooltip, lotw, card, qso
 
     if int(lotw) == 0:
         status = Status.QSL_NONE
@@ -99,9 +101,9 @@ def _cell_status_and_tooltip(value, country, band, tracking):
         if pending_html:
             tooltip = pending_html
 
-        return status, text, tooltip
+        return status, text, tooltip, lotw, card, qso
 
-    return Status.LOTW, text, tooltip
+    return Status.LOTW, text, tooltip, lotw, card, qso
 
 
 class TrackingAudit:
@@ -140,6 +142,20 @@ def build_challenge(rawtable):
     dxcc_count_unconfirmed = 0
     challenge_count = 0
     challenge_count_unconfirmed = 0
+    # Per-band cell-level totals for the Challenge Grid summary row -- one
+    # DXCC on one band is one cell, counted against that band only (not
+    # collapsed across bands the way dxcc_count/dxcc_count_unconfirmed are).
+    # "LoTW & Card" = confirmed at all (LoTW OR a physical card) -- same
+    # union as challenge_count's `status in (LOTW, QSL_CARD)` above, just
+    # per-band instead of a single grand total. "LoTW Only" = has LoTW,
+    # regardless of whether a card is *also* on file (not mutually exclusive
+    # with the row above -- a cell with both counts in both rows). Matches
+    # the Legend's own "LoTW" status-category count per band, since
+    # _cell_status_and_tooltip() assigns Status.LOTW whenever lotw > 0
+    # irrespective of card.
+    band_lotw_and_card = {band: 0 for band in STATIC_BANDS}
+    band_lotw_only = {band: 0 for band in STATIC_BANDS}
+    band_any_contact = {band: 0 for band in STATIC_BANDS}
 
     grid_rows = []
     for row in rows:
@@ -149,7 +165,7 @@ def build_challenge(rawtable):
         has_dxcc_unconfirmed = False
         for i, value in enumerate(row[1:], start=1):
             band = STATIC_BANDS[i - 1]
-            status, text, tooltip = _cell_status_and_tooltip(value, country, band, tracking)
+            status, text, tooltip, lotw, card, qso = _cell_status_and_tooltip(value, country, band, tracking)
             categories[status.name] = categories.get(status.name, 0) + 1
             audit.observe(country, band, status)
 
@@ -159,6 +175,13 @@ def build_challenge(rawtable):
             if status != Status.NULL:
                 has_dxcc_unconfirmed = True
                 challenge_count_unconfirmed += 1
+
+            if lotw > 0 or card > 0:
+                band_lotw_and_card[band] += 1
+            if lotw > 0:
+                band_lotw_only[band] += 1
+            if qso > 0:
+                band_any_contact[band] += 1
 
             cells.append({'text': text, 'status': status, 'tooltip': tooltip})
         if has_dxcc:
@@ -172,6 +195,11 @@ def build_challenge(rawtable):
         'rows': grid_rows,
         'legend': list(Status),
         'categories': categories,
+        'band_totals': {
+            'lotw_and_card': [band_lotw_and_card[b] for b in STATIC_BANDS],
+            'lotw_only': [band_lotw_only[b] for b in STATIC_BANDS],
+            'any_contact': [band_any_contact[b] for b in STATIC_BANDS],
+        },
         'stats': {
             'dxcc_confirmed': dxcc_count,
             'dxcc_with_unconfirmed': dxcc_count_unconfirmed,

@@ -39,6 +39,24 @@ def remote_view():
     return render_template("wsjtx_remote.html", my_call=my_call)
 
 
+@remote_bp.route("/remote/widget/<mode>")
+def remote_widget(mode):
+    """Dashboard widget: one of the four sections of the Remote tab --
+    Band Activity table, Rx Frequency table, Waterfall (with its mode
+    settings), or "the rest" (my-call, band buttons, control row, mode
+    stack, Configure panel, Tx message, status strip, Log QSO + Queued QSOs)
+    -- see templates/wsjtx_remote_widget.html and dashboard.py's module
+    docstring for the overall widget pattern. Renders the exact same
+    markup/JS as the full page (templates/_wsjtx_remote_body.html,
+    static/wsjtx_remote.js), the other three sections are just hidden via
+    CSS."""
+    if mode not in ("band_activity", "rx_freq", "waterfall", "rest"):
+        return render_template("error.html", error="Unknown widget: %r" % mode), 404
+    monitor = live_monitor.get_monitor()
+    my_call = monitor.config.my_call if monitor else ""
+    return render_template("wsjtx_remote_widget.html", widget_mode=mode, my_call=my_call)
+
+
 @remote_bp.route("/remote/waterfall")
 def remote_waterfall_view():
     """Standalone full-page waterfall -- always visible regardless of the

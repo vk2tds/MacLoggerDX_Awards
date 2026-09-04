@@ -1,0 +1,16 @@
+{% extends "base_widget.html" %}
+{% block title %}DXCC: Legend{% endblock %}
+{% block content %}
+<table class="legend-table">
+  <tr>
+    {% for status in challenge.legend %}
+      <td style="background-color: {{ status.color }};">{{ status.label }}</td>
+    {% endfor %}
+  </tr>
+  <tr>
+    {% for status in challenge.legend %}
+      <td>{{ challenge.categories.get(status.name, 0) }}</td>
+    {% endfor %}
+  </tr>
+</table>
+{% endblock %}

@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{% block title %}Widget{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<style>
+  /* Minimal shell for a Dashboard widget iframe -- no nav, no page chrome,
+     tight padding sized for a small tile rather than a full page (main's
+     own 3rem bottom padding in style.css is meant for a scrolling page, not
+     a fixed-height widget). Own scrollbar, not the parent page's. */
+  html, body { height: 100%; }
+  body { overflow: auto; }
+  .widget-body { padding: 0.5rem 0.65rem; }
+</style>
+</head>
+<body{% block body_attrs %}{% endblock %}>
+<div class="widget-body">
+{% block content %}{% endblock %}
+</div>
+</body>
+</html>

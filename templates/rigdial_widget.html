@@ -1,0 +1,7 @@
+{% extends "base_widget.html" %}
+{% block title %}RigDial{% endblock %}
+{% block body_attrs %} data-widget-mode=""{% endblock %}
+{% block content %}
+{% include "_rigdial_body.html" %}
+<script src="{{ url_for('static', filename='rigdial.js') }}"></script>
+{% endblock %}

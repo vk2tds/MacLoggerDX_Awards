@@ -5,7 +5,7 @@
 // not a true spectrogram.
 function createWaterfall(canvas, opts) {
   const ctx = canvas.getContext('2d');
-  const WF_W = canvas.width;
+  let WF_W = canvas.width;
   const ROW_H = 22;
   const RULER_H = 16;
   const FREQ_MAX = 3000;
@@ -13,6 +13,7 @@ function createWaterfall(canvas, opts) {
   const MIN_ROWS = 2;
   let rows = Math.max(MIN_ROWS, Math.min(MAX_ROWS, (opts && opts.rows) || 16));
   let data = [];
+  const onRowsChanged = (opts && opts.onRowsChanged) || null;
 
   function freqToX(hz) {
     return Math.max(0, Math.min(WF_W, (hz / FREQ_MAX) * WF_W));
@@ -101,9 +102,44 @@ function createWaterfall(canvas, opts) {
     canvas.height = RULER_H + rows * ROW_H;
     if (data.length > rows) data.length = rows;
     draw();
+    if (onRowsChanged) onRowsChanged(rows);
     return rows;
   }
 
+  // -- Auto-fit (opts.autoFit): recompute the canvas's actual pixel buffer
+  // (both width and row count) from its rendered CSS box, so a taller
+  // resized Dashboard tile actually uses the space instead of leaving dead
+  // space below it (the fixed width="..."/height="..." HTML attributes
+  // this canvas starts with never change on their own). Opt-in: the
+  // standalone full-page/tab has no resizable container behind it, so it
+  // keeps the existing fixed-size-plus-manual-Rows-input behavior.
+  //
+  // Polled on an interval rather than via ResizeObserver: confirmed live
+  // that a ResizeObserver attached during (or shortly after) a Dashboard
+  // tile's initial GridStack insertion stops receiving further callbacks
+  // once that insertion's own layout/animation settles, even though the
+  // box keeps genuinely changing size on later drag-resizes -- a fresh
+  // observer created well after mount tracks resizes fine, but nothing
+  // short of an arbitrary and unreliable delay reproduced that "well
+  // after" reliably from inside here. A plain size check is immune to
+  // whatever's going on with GridStack + ResizeObserver and costs nothing
+  // between actual resizes (early-exits when nothing changed).
+  let autoFitTimer = null;
+  if (opts && opts.autoFit) {
+    let lastW = -1, lastH = -1;
+    autoFitTimer = setInterval(() => {
+      const rect = canvas.getBoundingClientRect();
+      const w = Math.round(rect.width), h = Math.round(rect.height);
+      if (w < 1 || h < 1 || (w === lastW && h === lastH)) return;
+      lastW = w; lastH = h;
+      if (w !== WF_W) { WF_W = w; canvas.width = w; }
+      resize(Math.floor((h - RULER_H) / ROW_H));
+    }, 400);
+  }
+
   resize(rows);
-  return { onDecode, clear, resize, get rows() { return rows; } };
+  return {
+    onDecode, clear, resize, get rows() { return rows; },
+    stopAutoFit() { if (autoFitTimer) clearInterval(autoFitTimer); },
+  };
 }

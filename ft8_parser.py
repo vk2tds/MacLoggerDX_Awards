@@ -77,6 +77,37 @@ def _strip_suffixes(call: str) -> str:
     return call
 
 
+def _is_ack_token(tok: Optional[str]) -> bool:
+    return tok is not None and tok.rstrip(".,;:") in ACK_TOKENS
+
+
+_CALLSIGN_CHARS_RE = re.compile(r"^[A-Z0-9/]+$", re.IGNORECASE)
+
+
+def _looks_like_callsign(tok: str) -> bool:
+    """Loose sanity check: every real amateur callsign contains at least one
+    digit (the ITU prefix+digit+suffix convention) and consists only of
+    letters/digits/a portable-prefix slash, so a token with no digit at all,
+    or containing anything else, can't be one. Regression (live 2026-08-19):
+    "73 TNX QSO" -- a plain free-text sign-off, not a structured exchange --
+    was decoding with "TNX" landing in the DE slot and getting accepted as a
+    real callsign (DX Monitor showed a station literally named "TNX" under
+    Republic of the Congo), since ACK_TOKENS only covers RRR/RR73/73, not
+    other common ham jargon (TNX, QSO, GL, GM, FB, UR, ...) that can end up
+    there the same way. Deliberately NOT the full CALL_RE here -- that also
+    caps the trailing "/suffix" at 4 characters, which would wrongly reject
+    a legitimate compound call like "V4/SP9FIH" (a 6-character home call
+    after the slash) -- see _resolve_call_token below.
+
+    Regression (live 2026-08-30): the digit-only version of this check
+    still let a bare signal report like "+00" through (it has digits, just
+    not letters) -- "F6DZU +00" logged a station literally named "+00" as
+    an unknown DXCC call. A real callsign never contains "+"/"-"/space, so
+    require the whole token to be alnum-or-slash too, not just "has a
+    digit somewhere"."""
+    return bool(_CALLSIGN_CHARS_RE.match(tok)) and any(c.isdigit() for c in tok)
+
+
 def _resolve_call_token(tok: Optional[str]) -> tuple:
     """WSJT-X wraps a callsign in "<...>" when it's sent via the compressed/
     hashed-callsign slot of the message. If the bracketed content is exactly
@@ -86,14 +117,52 @@ def _resolve_call_token(tok: Optional[str]) -> tuple:
     should be treated like any other token, brackets stripped.
 
     Returns (callsign_or_None, was_unresolved_hash).
-    """
+
+    Deliberately rejects ACK_TOKENS ("RRR"/"RR73"/"73", punctuation
+    stripped) and any token with no digit at all (see
+    _looks_like_callsign) here too, not just in parse_message()'s
+    single-token fallback -- this function backs the TO/DE positions of
+    ordinary exchanges and the CQ branch's call slot as well, and neither
+    validated its token's shape at all otherwise, so a garbled/low-
+    confidence decode whose TO or DE token happens to be an ack word or
+    other non-callsign free text was being accepted verbatim as a real
+    callsign (a real DX Monitor report: "RR73;"/"TNX" grouped under a DXCC
+    entity as if either were an actual station -- the single-token fix
+    alone didn't cover this since the bad token wasn't the *only* token in
+    that decode, it was sitting in the TO/DE slot of what looked like an
+    ordinary 2/3-token exchange)."""
     if tok is None:
         return None, False
     if tok == "<...>":
         return None, True
     if len(tok) >= 2 and tok[0] == "<" and tok[-1] == ">":
-        return tok[1:-1], False
+        inner = tok[1:-1]
+        if _is_ack_token(inner) or not _looks_like_callsign(inner):
+            return None, False
+        return inner, False
+    if _is_ack_token(tok) or not _looks_like_callsign(tok):
+        return None, False
     return tok, False
+
+
+def _first_bracketed_call(tokens: list) -> Optional[str]:
+    """Two transmissions occasionally get decoded as one garbled string
+    (e.g. "KE6FV RR73; VE2WNF <TN8GD> -16" -- the real DE slot collided
+    with an ack token, but a *different* token later in the message is
+    still a genuine WSJT-X compressed-callsign decode). Unlike a bare
+    uppercase token, "<CALL>" is WSJT-X's own confident decode of a real
+    callsign, not a guess -- safe to use even outside its normal TO/DE
+    position, unlike scanning for any callsign-shaped token (which would
+    just as happily "resolve" the TO station in a message where the real
+    transmitting station is genuinely unknown -- see
+    test_ack_token_in_to_de_position_is_not_a_callsign)."""
+    for tok in tokens:
+        clean = tok.rstrip(".,;:")
+        if len(clean) >= 2 and clean[0] == "<" and clean[-1] == ">":
+            call, _ = _resolve_call_token(clean)
+            if call:
+                return call
+    return None
 
 
 def parse_message(raw: str) -> ParsedMessage:
@@ -124,6 +193,11 @@ def parse_message(raw: str) -> ParsedMessage:
             result.grid = grid_tok
         result.call_area = _call_area_digit(result.de_call) if result.de_call else None
         result.subject_call = result.de_call
+        if result.subject_call is None:
+            salvaged = _first_bracketed_call(rest)
+            if salvaged:
+                result.subject_call = salvaged
+                result.call_area = _call_area_digit(salvaged)
         return result
 
     # Non-CQ: "<TO> <DE> [<GRID>|<REPORT>|RRR|RR73|73]"
@@ -147,10 +221,23 @@ def parse_message(raw: str) -> ParsedMessage:
 
         result.call_area = _call_area_digit(result.de_call) if result.de_call else None
         result.subject_call = result.de_call
+        if result.subject_call is None:
+            salvaged = _first_bracketed_call(tokens)
+            if salvaged:
+                result.subject_call = salvaged
+                result.call_area = _call_area_digit(salvaged)
         return result
 
-    # Single token or something unusual (free text, tuning signal, etc.)
-    if len(tokens) == 1 and CALL_RE.match(tokens[0]):
+    # Single token or something unusual (free text, tuning signal, etc.).
+    # Explicitly excludes ACK_TOKENS ("RRR"/"RR73"/"73") -- a bare
+    # acknowledgment with no visible TO/DE (WSJT-X can decode one alone when
+    # the callsigns in that particular frame are hashed/unresolved) happens
+    # to superficially match CALL_RE's loose letter-digit-letter shape, and
+    # was being grouped on DX Monitor as if "RR73" were itself a real
+    # station -- a bare ack genuinely carries no reliable callsign
+    # information, so leaving subject_call unset (dropping it, same as any
+    # other unparseable decode) is correct here, not a regression.
+    if len(tokens) == 1 and not _is_ack_token(tokens[0]) and CALL_RE.match(tokens[0]):
         result.de_call = tokens[0]
         result.subject_call = tokens[0]
         result.call_area = _call_area_digit(tokens[0])

@@ -1,0 +1,303 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+<p style="color:#666; font-size:0.85rem; max-width:60em; margin-top:-0.5rem;">
+  Drag a tile by its title bar to move it, drag its bottom-right corner to resize. Nothing is saved
+  until you click Save/Save As -- rearranging just changes what's on screen right now. Each tile is a
+  small independent page (its own live connection where relevant), same as opening that piece of the
+  app in its own tab.
+</p>
+
+<style>
+  .dash-toolbar { display: flex; flex-wrap: wrap; gap: 0.6rem 1rem; align-items: center; margin-bottom: 0.75rem; font-size: 0.85rem; }
+  .dash-toolbar select, .dash-toolbar button { font-size: 0.85rem; padding: 0.25rem 0.5rem; }
+  .dash-toolbar .sep { width: 1px; align-self: stretch; background: var(--border); }
+  #dash-result { color: #666; }
+  #dash-result.err { color: #c62828; }
+
+  .grid-stack { background: color-mix(in srgb, var(--bg) 96%, var(--fg)); border-radius: 6px; }
+  .dash-tile { display: flex; flex-direction: column; width: 100%; height: 100%; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--bg); }
+  .dash-tile-header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.3rem 0.6rem; background: color-mix(in srgb, var(--bg) 90%, var(--fg)); border-bottom: 1px solid var(--border); font-size: 0.8rem; font-weight: 600; cursor: move; user-select: none; }
+  .dash-tile-remove { cursor: pointer; border: none; background: none; color: var(--muted); font-size: 1rem; line-height: 1; padding: 0 0.2rem; }
+  .dash-tile-remove:hover { color: #c62828; }
+  .dash-tile-body { flex: 1; width: 100%; overflow: auto; }
+  .dash-tile iframe { flex: 1; width: 100%; border: none; background: var(--bg); }
+  .grid-stack.dash-locked .dash-tile-header { cursor: default; }
+</style>
+
+<div class="dash-toolbar">
+  <label>Layout <select id="dash-layout-select"><option value="">(none loaded)</option></select></label>
+  <button id="dash-load-btn" type="button">Load</button>
+  <button id="dash-save-btn" type="button">Save</button>
+  <button id="dash-save-as-btn" type="button">Save As…</button>
+  <button id="dash-delete-btn" type="button">Delete</button>
+  <span class="sep"></span>
+  <label>Add widget <select id="dash-add-select">
+    {% for w in catalog %}<option value="{{ w.id }}">{{ w.name }}</option>{% endfor %}
+  </select></label>
+  <button id="dash-add-btn" type="button">Add</button>
+  <span class="sep"></span>
+  <label><input type="checkbox" id="dash-lock-check"> Lock layout</label>
+  <span id="dash-result"></span>
+</div>
+
+<div class="grid-stack"></div>
+
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/gridstack/gridstack.min.css') }}">
+<script src="{{ url_for('static', filename='vendor/gridstack/gridstack-all.js') }}"></script>
+<script src="{{ url_for('static', filename='dashboard_live.js') }}"></script>
+<script src="{{ url_for('static', filename='applets/dxcc.js') }}"></script>
+<script src="{{ url_for('static', filename='live_monitor.js') }}"></script>
+<script src="{{ url_for('static', filename='live_entities.js') }}"></script>
+<script src="{{ url_for('static', filename='logbook.js') }}"></script>
+<script src="{{ url_for('static', filename='applets/clock.js') }}"></script>
+<script src="{{ url_for('static', filename='applets/help.js') }}"></script>
+<script src="{{ url_for('static', filename='radio_control.js') }}"></script>
+<script src="{{ url_for('static', filename='rigdial.js') }}"></script>
+<script src="{{ url_for('static', filename='frequencies.js') }}"></script>
+<script src="{{ url_for('static', filename='qsl_helper.js') }}"></script>
+<script src="{{ url_for('static', filename='waterfall.js') }}"></script>
+<script src="{{ url_for('static', filename='spectrum_waterfall.js') }}"></script>
+<script src="{{ url_for('static', filename='wsjtx_remote.js') }}"></script>
+<script>
+(function () {
+  const CATALOG = {{ catalog | tojson }};
+  const catalogById = Object.fromEntries(CATALOG.map(w => [w.id, w]));
+
+  // -- JS-applet mounting (piecemeal migration off iframes, see
+  // /Users/darryl/.claude/plans/crystalline-bouncing-meteor.md) -- a widget
+  // whose id has a window.DashboardApplets[id] entry mounts directly into
+  // this page's own DOM (inside a Shadow DOM for CSS isolation) sharing one
+  // /live/ws connection via `liveFeed` below; anything not yet migrated
+  // keeps using the original <iframe src="..."> fallback unchanged.
+  const liveFeed = createDashboardLiveFeed();
+
+  // Parses static/style.css into a Constructable Stylesheet once and
+  // reuses it across every shadow root -- ordinary CSS rules (unlike custom
+  // properties) don't inherit through a shadow boundary, so widgets whose
+  // markup depends on shared rules in style.css (e.g. DXCC's plain
+  // <table>s, which have no styling of their own) need it adopted
+  // explicitly or they'd render unstyled.
+  let sharedSheetPromise = null;
+  function loadSharedSheet() {
+    if (!sharedSheetPromise) {
+      sharedSheetPromise = fetch('{{ url_for("static", filename="style.css") }}')
+        .then(r => r.text())
+        .then(css => {
+          const sheet = new CSSStyleSheet();
+          sheet.replaceSync(css);
+          return sheet;
+        });
+    }
+    return sharedSheetPromise;
+  }
+
+  // Fetches a widget's existing standalone route (the same URL the iframe
+  // fallback would use), pulls out base_widget.html's .widget-body content
+  // (including that family's own inline <style> block, which travels with
+  // it), and mounts it inside a shadow root -- no server/template changes
+  // needed for a widget to be fetchable this way, migrated or not.
+  async function mountApplet(widgetDef, hostDiv) {
+    const applet = window.DashboardApplets[widgetDef.id];
+    const shadow = hostDiv.attachShadow({ mode: 'open' });
+    shadow.adoptedStyleSheets = [await loadSharedSheet()];
+    const html = await fetch(widgetDef.src).then(r => r.text());
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const body = doc.querySelector('.widget-body');
+    if (body) {
+      // Deliberately skip <script> elements -- the applet's own mount()
+      // (registered by that family's script when it loaded normally via
+      // dashboard.html's own <script src> tag, see e.g. static/live_monitor.js)
+      // already provides everything this fetched page's bootstrap script
+      // would have done. Moving a <script> element parsed by DOMParser into
+      // a connected document can actually execute it (unlike innerHTML,
+      // which never does) -- redundant at best, and was observed here
+      // throwing a real SyntaxError on the fetched-source-as-text parse.
+      Array.from(body.childNodes).forEach(node => {
+        if (node.nodeType === 1 && node.tagName === 'SCRIPT') return;
+        shadow.appendChild(node);
+      });
+    }
+    return applet.mount(shadow, liveFeed);
+  }
+
+  const gridEl = document.querySelector('.grid-stack');
+  const layoutSelect = document.getElementById('dash-layout-select');
+  const addSelect = document.getElementById('dash-add-select');
+  const lockCheck = document.getElementById('dash-lock-check');
+  const resultEl = document.getElementById('dash-result');
+
+  function showResult(ok, msg) {
+    resultEl.textContent = msg;
+    resultEl.className = ok ? '' : 'err';
+    setTimeout(() => { resultEl.textContent = ''; }, 5000);
+  }
+
+  const grid = GridStack.init({
+    cellHeight: 45,
+    margin: 6,
+    disableOneColumnMode: true,
+    handle: '.dash-tile-header',
+    // float:false (GridStack's default, but stated explicitly since this
+    // used to be true) -- with float:true, dragging a tile onto an
+    // occupied spot just pushes the occupant straight down a row and
+    // leaves it there, even when a gap exists elsewhere it could settle
+    // into (confirmed live: dragging A onto B left B sitting alone a full
+    // row below, wasting the rest of that row). float:false makes
+    // GridStack auto-compact after every layout change -- a displaced
+    // tile slides into the nearest open gap instead (verified live: same
+    // drag now cleanly swaps A and B in place, and removing a tile lets
+    // the rest settle instead of leaving a hole).
+    float: false,
+  }, gridEl);
+
+  // Each tile gets its own unique instance id (a widget type can be added
+  // more than once, e.g. two DXCC grids side by side) -- data-widget-type
+  // records *which* catalog entry it is, for saving and for re-hydrating
+  // the iframe src/title on load.
+  let nextInstanceSeq = 1;
+
+  function makeTileContent(widgetDef) {
+    const wrap = document.createElement('div');
+    wrap.className = 'dash-tile';
+    wrap.innerHTML = `
+      <div class="dash-tile-header">
+        <span>${widgetDef.name}</span>
+        <button class="dash-tile-remove" type="button" title="Remove">×</button>
+      </div>
+    `;
+    const bodyHost = document.createElement('div');
+    bodyHost.className = 'dash-tile-body';
+    wrap.appendChild(bodyHost);
+
+    const applet = window.DashboardApplets && window.DashboardApplets[widgetDef.id];
+    if (applet) {
+      mountApplet(widgetDef, bodyHost).then(unmount => { bodyHost._unmount = unmount; });
+    } else {
+      bodyHost.innerHTML = `<iframe src="${widgetDef.src}"></iframe>`;
+    }
+    return wrap;
+  }
+
+  function removeTile(el) {
+    const bodyHost = el.querySelector('.dash-tile-body');
+    if (bodyHost && typeof bodyHost._unmount === 'function') bodyHost._unmount();
+    grid.removeWidget(el);
+  }
+
+  function addTile(widgetId, opts) {
+    const widgetDef = catalogById[widgetId];
+    if (!widgetDef) return null;
+    const instanceId = (opts && opts.id) || `${widgetId}-${nextInstanceSeq++}`;
+    const el = grid.addWidget({
+      id: instanceId,
+      x: opts && opts.x, y: opts && opts.y,
+      w: (opts && opts.w) || widgetDef.w, h: (opts && opts.h) || widgetDef.h,
+      content: '',
+    });
+    el.dataset.widgetType = widgetId;
+    const contentHost = el.querySelector('.grid-stack-item-content');
+    contentHost.appendChild(makeTileContent(widgetDef));
+    contentHost.querySelector('.dash-tile-remove').addEventListener('click', () => removeTile(el));
+    return el;
+  }
+
+  document.getElementById('dash-add-btn').addEventListener('click', () => {
+    addTile(addSelect.value);
+  });
+
+  lockCheck.addEventListener('change', () => {
+    grid.setStatic(lockCheck.checked);
+    gridEl.classList.toggle('dash-locked', lockCheck.checked);
+  });
+
+  // -- Named layouts --
+  const LAST_LAYOUT_KEY = 'dashboard_last_layout';
+
+  function clearGrid() {
+    grid.removeAll();
+  }
+
+  function loadLayoutByName(name) {
+    return fetch(`/dashboard/layouts/${encodeURIComponent(name)}`).then(r => r.json()).then(d => {
+      if (!d.ok) { showResult(false, d.error || 'Load failed'); return; }
+      clearGrid();
+      (d.items || []).forEach(item => {
+        if (!catalogById[item.widgetType]) return; // stale/unknown widget type -- skip rather than crash
+        addTile(item.widgetType, { id: item.id, x: item.x, y: item.y, w: item.w, h: item.h });
+      });
+      layoutSelect.value = name;
+      localStorage.setItem(LAST_LAYOUT_KEY, name);
+      showResult(true, `Loaded "${name}".`);
+    }).catch(e => showResult(false, String(e)));
+  }
+
+  function refreshLayoutList(selectName) {
+    return fetch('/dashboard/layouts').then(r => r.json()).then(d => {
+      layoutSelect.innerHTML = '<option value="">(none loaded)</option>' +
+        (d.names || []).map(n => `<option value="${n}">${n}</option>`).join('');
+      if (selectName) layoutSelect.value = selectName;
+    });
+  }
+
+  function currentLayoutItems() {
+    // GridStack's own save() gives {id,x,y,w,h,...} per item -- add back
+    // which catalog widget each instance id actually is.
+    return grid.save(false).map(it => ({
+      id: it.id, x: it.x, y: it.y, w: it.w, h: it.h,
+      widgetType: gridEl.querySelector(`[gs-id="${it.id}"]`)?.dataset.widgetType,
+    })).filter(it => it.widgetType);
+  }
+
+  function saveLayoutAs(name) {
+    if (!name) return;
+    postJson(`/dashboard/layouts/${encodeURIComponent(name)}`, { items: currentLayoutItems() })
+      .then(d => {
+        if (!d.ok) { showResult(false, d.error || 'Save failed'); return; }
+        localStorage.setItem(LAST_LAYOUT_KEY, name);
+        showResult(true, `Saved "${name}".`);
+        refreshLayoutList(name);
+      }).catch(e => showResult(false, String(e)));
+  }
+
+  function postJson(url, body) {
+    return fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}),
+    }).then(r => r.json());
+  }
+
+  document.getElementById('dash-load-btn').addEventListener('click', () => {
+    if (layoutSelect.value) loadLayoutByName(layoutSelect.value);
+  });
+  document.getElementById('dash-save-btn').addEventListener('click', () => {
+    if (layoutSelect.value) { saveLayoutAs(layoutSelect.value); return; }
+    const name = prompt('Save as new layout name:');
+    if (name) saveLayoutAs(name.trim());
+  });
+  document.getElementById('dash-save-as-btn').addEventListener('click', () => {
+    const name = prompt('Save as new layout name:', layoutSelect.value || '');
+    if (name) saveLayoutAs(name.trim());
+  });
+  document.getElementById('dash-delete-btn').addEventListener('click', () => {
+    const name = layoutSelect.value;
+    if (!name) return;
+    if (!confirm(`Delete layout "${name}"?`)) return;
+    fetch(`/dashboard/layouts/${encodeURIComponent(name)}`, { method: 'DELETE' }).then(r => r.json()).then(d => {
+      if (!d.ok) { showResult(false, d.error || 'Delete failed'); return; }
+      showResult(true, `Deleted "${name}".`);
+      if (localStorage.getItem(LAST_LAYOUT_KEY) === name) localStorage.removeItem(LAST_LAYOUT_KEY);
+      layoutSelect.value = '';
+      refreshLayoutList();
+    }).catch(e => showResult(false, String(e)));
+  });
+
+  refreshLayoutList().then(() => {
+    const last = localStorage.getItem(LAST_LAYOUT_KEY);
+    if (last && Array.from(layoutSelect.options).some(o => o.value === last)) {
+      loadLayoutByName(last);
+    }
+  });
+})();
+</script>
+{% endblock %}

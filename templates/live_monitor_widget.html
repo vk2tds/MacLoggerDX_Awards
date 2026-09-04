@@ -1,0 +1,7 @@
+{% extends "base_widget.html" %}
+{% block title %}Live Monitor: {{ {'selection': 'Selection', 'cq': "CQ's", 'noncq': 'Non-CQs', 'merged': "CQ's + Non-CQs"}[widget_mode] }}{% endblock %}
+{% block body_attrs %} data-widget-mode="{{ widget_mode }}"{% endblock %}
+{% block content %}
+{% include "_live_monitor_body.html" %}
+<script src="{{ url_for('static', filename='live_monitor.js') }}"></script>
+{% endblock %}

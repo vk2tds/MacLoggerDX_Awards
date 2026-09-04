@@ -1,0 +1,412 @@
+<style>
+  .wsjtx-shell { background: #ececec; border: 1px solid #b8b8b8; border-radius: 8px; padding: 0.75rem; font-family: -apple-system, "Segoe UI", sans-serif; color: #111; }
+
+  .panels-title-row { display: flex; gap: 1px; background: #b8b8b8; border: 1px solid #b8b8b8; border-radius: 4px 4px 0 0; overflow: hidden; }
+  .panels-title-row > div { flex: 1; background: #d8d8d8; text-align: center; font-weight: 600; font-size: 0.85rem; padding: 0.3rem; }
+
+  .remote-panels { display: flex; gap: 1px; background: #b8b8b8; border: 1px solid #b8b8b8; border-top: none; margin-bottom: 0.75rem; }
+  .remote-panel { flex: 1 1 50%; min-width: 0; background: #fff; }
+
+  /* Below tablet-ish widths the two panes get too cramped to read (Message
+     column truncates badly) -- stack them instead, each keeping its own
+     horizontal scroll for the table itself. */
+  @media (max-width: 900px) {
+    .panels-title-row, .remote-panels { flex-direction: column; }
+    .remote-panel { flex: 1 1 auto; }
+  }
+  .remote-panel-scroll { overflow-x: auto; max-height: 42vh; overflow-y: auto; }
+  .remote-queue-scroll { max-height: 30vh; }
+  table.remote-table { border-collapse: collapse; width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; }
+  table.remote-table th, table.remote-table td { padding: 0.12rem 0.4rem; text-align: left; white-space: nowrap; }
+  table.remote-table thead th { position: sticky; top: 0; background: #eee; border-bottom: 1px solid #ccc; font-weight: 600; }
+  /* SNR ("dB") is numeric -- right-justify like every other SNR column in
+     the app (Live Monitor, DX Monitor, QSL Helper). Specificity note: needs
+     to be at least as specific as the th/td rule above (2 classes) since a
+     bare .col-snr would lose to it. */
+  table.remote-table .col-snr { text-align: right; }
+  table.remote-table tbody tr:hover { background: #eef6ff; cursor: pointer; }
+  .row-cq { background: #c9f2c9; }
+  .call-link { text-decoration: underline dotted; cursor: pointer; }
+
+  /* Worked/confirmed/none coloring for Call and DXCC cells -- same palette
+     as Live Monitor's col-call/col-dxcc, fixed to the "band" scope since
+     this tab has no scope-selector checkboxes (it's inherently tied to
+     whatever band/mode WSJT-X is currently on). */
+  .status-confirmed { color: #2e7d32; font-weight: 600; }
+  .status-worked { color: #e67e22; font-weight: 600; }
+  .status-none { color: #c62828; }
+  .status-unknown { color: inherit; }
+  .qrz-link { color: #888; text-decoration: none; font-size: 0.7rem; border: 1px solid #ccc; border-radius: 3px; padding: 0 0.25rem; margin-left: 0.25rem; }
+  .qrz-link:hover { color: #1565c0; border-color: #1565c0; }
+  .history-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.4rem; font-size: 0.82rem; margin: 0.6rem 0; }
+  .history-summary div { background: #f4f4f4; border-radius: 4px; padding: 0.35rem 0.5rem; }
+  .history-lines { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; max-height: 40vh; overflow-y: auto; background: #fafafa; padding: 0.5rem; border-radius: 4px; }
+  .history-lines div.tx { color: #1565c0; }
+  .row-directed { background: #ff9d9d; }
+  .time-bold { font-weight: 700; }
+  .rxfreq-controls { font-size: 0.7rem; color: #666; padding: 0.1rem 0.4rem; text-align: right; background: #fff; border-bottom: 1px solid #eee; }
+  .rxfreq-controls input { width: 3.5em; }
+
+  .waterfall-shell { overflow-x: auto; background: #07143a; border: 1px solid #b8b8b8; border-radius: 4px; }
+  #waterfall-canvas, #spectrum-canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; }
+  .waterfall-caption { font-size: 0.7rem; color: #888; margin: 0.25rem 0 0.75rem; }
+  .waterfall-toolbar { display: flex; align-items: center; gap: 1rem; font-size: 0.78rem; margin-bottom: 0.3rem; flex-wrap: wrap; }
+  .waterfall-toolbar label { display: flex; align-items: center; gap: 0.3rem; }
+  .waterfall-toolbar input[type=number] { width: 3.5em; }
+  .waterfall-pop-link { color: #1565c0; text-decoration: none; margin-left: auto; }
+  .waterfall-pop-link:hover { text-decoration: underline; }
+  .spectrum-ruler { display: flex; justify-content: space-between; font-size: 0.65rem; color: #9db3e0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; padding: 0.1rem 0.2rem; background: #1a2a5a; }
+
+  /* Dashboard-widget context, waterfall mode: the canvas's own
+     width:100%;height:auto (above) preserves its fixed HTML width/height
+     attributes' aspect ratio, so it never actually grows to use a taller
+     resized tile -- it just leaves dead space below (or gets cropped).
+     Make the block a flex column filling the tile, give the canvas an
+     explicit height:100% instead of auto, and static/wsjtx_remote.js
+     passes autoFit:true to createWaterfall()/createSpectrumWaterfall() (see
+     their own comments in static/waterfall.js / spectrum_waterfall.js) so
+     a size-polling loop keeps the canvas's actual pixel buffer -- both
+     rows and width -- in sync with this box's real rendered size on every
+     GridStack drag-resize. */
+  body[data-widget-mode="waterfall"] .wsjtx-shell,
+  :host([data-widget-mode="waterfall"]) .wsjtx-shell { height: 100%; }
+  body[data-widget-mode="waterfall"] #waterfall-block,
+  :host([data-widget-mode="waterfall"]) #waterfall-block { display: flex; flex-direction: column; height: 100%; }
+  body[data-widget-mode="waterfall"] .waterfall-toolbar, body[data-widget-mode="waterfall"] #spectrum-warn, body[data-widget-mode="waterfall"] .waterfall-caption,
+  :host([data-widget-mode="waterfall"]) .waterfall-toolbar, :host([data-widget-mode="waterfall"]) #spectrum-warn, :host([data-widget-mode="waterfall"]) .waterfall-caption { flex: none; }
+  body[data-widget-mode="waterfall"] .waterfall-shell,
+  :host([data-widget-mode="waterfall"]) .waterfall-shell { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+  body[data-widget-mode="waterfall"] .spectrum-ruler,
+  :host([data-widget-mode="waterfall"]) .spectrum-ruler { flex: none; }
+  body[data-widget-mode="waterfall"] #waterfall-canvas, body[data-widget-mode="waterfall"] #spectrum-canvas,
+  :host([data-widget-mode="waterfall"]) #waterfall-canvas, :host([data-widget-mode="waterfall"]) #spectrum-canvas { height: 100%; flex: 1; min-height: 0; }
+
+  .wsjtx-body { display: flex; gap: 0.75rem; align-items: stretch; flex-wrap: wrap; }
+
+  .mode-stack { display: flex; flex-direction: column; gap: 2px; width: 5.5rem; }
+  .mode-stack button { padding: 0.4rem 0.2rem; border: 1px solid #999; background: #f4f4f4; cursor: pointer; font-size: 0.82rem; border-radius: 2px; }
+  .mode-stack button.active { background: #2f6fed; color: #fff; border-color: #2f6fed; font-weight: 600; }
+
+  .center-col { flex: 1 1 320px; min-width: 280px; display: flex; flex-direction: column; gap: 0.5rem; }
+  .band-row { display: flex; gap: 2px; flex-wrap: wrap; font-size: 0.78rem; color: #666; }
+  .band-row button { flex: 1 1 auto; min-width: 2.6rem; padding: 0.35rem 0.2rem; border: 1px solid #999; background: #e8e8e8; color: #333; cursor: pointer; font-size: 0.78rem; border-radius: 2px; }
+  .band-row button:hover { background: #d8d8d8; }
+  .band-row button.current { background: #2e9c4a; color: #fff; border-color: #2e9c4a; cursor: default; }
+  .band-row button.current:hover { background: #2e9c4a; }
+
+  .btn-row { display: flex; gap: 0.3rem; flex-wrap: wrap; align-items: center; }
+  .btn-row button { padding: 0.3rem 0.7rem; border: 1px solid #999; background: #f4f4f4; font-size: 0.8rem; border-radius: 3px; cursor: pointer; }
+  .btn-row button:disabled { color: #aaa; cursor: not-allowed; background: #ececec; }
+  .btn-row button.live { cursor: pointer; }
+  .btn-row button.live:hover { background: #e0e0e0; }
+  .btn-row label { font-size: 0.78rem; display: flex; align-items: center; gap: 0.25rem; }
+  .gui-toggle { padding: 0.15rem 0.4rem; border: 1px solid #999; border-radius: 3px; background: #f4f4f4; }
+  .gui-toggle-warn { border-color: #c62828; }
+  .gui-toggle-warn input:checked + * , .gui-toggle-warn:has(input:checked) { color: #c62828; }
+  #gui-bridge-hint.err { color: #c62828; }
+
+  .freq-readout { display: flex; align-items: center; gap: 0.5rem; }
+  .freq-readout .dot { width: 0.8rem; height: 0.8rem; border-radius: 50%; background: #999; flex-shrink: 0; }
+  .freq-readout .dot.up { background: #2e9c4a; }
+  .freq-readout .dot.down { background: #c62828; }
+  .freq-readout .val { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.7rem; font-weight: 600; background: #000; color: #ffcc33; padding: 0.1rem 0.6rem; border-radius: 3px; letter-spacing: 1px; }
+
+  .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem 0.6rem; background: #fff; border: 1px solid #ccc; border-radius: 4px; padding: 0.5rem; }
+  .field-grid label { font-size: 0.72rem; color: #555; display: block; }
+  .field-grid input, .field-grid select { width: 100%; box-sizing: border-box; padding: 0.2rem 0.3rem; font-size: 0.85rem; }
+  .field-grid .full { grid-column: 1 / -1; }
+
+  .right-col { flex: 1 1 320px; min-width: 280px; background: #fff; border: 1px solid #ccc; border-radius: 4px; padding: 0.6rem; }
+  .right-col h3 { font-size: 0.85rem; margin: 0 0 0.5rem; }
+  .tx-msg-row { display: flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.4rem; border: 1px solid #ddd; border-radius: 3px; margin-bottom: 0.3rem; background: #fafafa; }
+  .tx-msg-row input[type=text] { flex: 1; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; border: 1px solid #ccc; padding: 0.25rem 0.4rem; }
+  .action-result { font-size: 0.75rem; margin-left: 0.4rem; }
+  .action-result.ok { color: #2e7d32; }
+  .action-result.err { color: #c62828; }
+  .warn { color: #b45309; font-size: 0.72rem; margin-top: 0.4rem; }
+
+  .status-strip { display: flex; gap: 1rem; align-items: center; margin-top: 0.75rem; padding: 0.4rem 0.7rem; border-radius: 4px; font-size: 0.8rem; background: #2e9c4a; color: #fff; }
+  .status-strip.tx { background: #f4c20d; color: #000; }
+  .status-strip .sep { opacity: 0.6; }
+
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
+  .modal-box { background: #fff; border-radius: 6px; padding: 1rem 1.25rem; width: min(560px, 92vw); max-height: 85vh; overflow-y: auto; box-shadow: 0 8px 30px rgba(0,0,0,0.3); }
+  .modal-box h3 { margin: 0 0 0.3rem; }
+
+  /* Only relevant on the Dashboard widget variants (see
+     templates/wsjtx_remote_widget.html) -- body[data-widget-mode] is never
+     set on the full page, so all four sections always show there
+     unchanged. The two modals (log-qso-overlay/history-overlay) live
+     outside all four sections below so they still work regardless of which
+     widget triggered them -- Band Activity and Rx Frequency both need the
+     history modal for their own call-links. */
+  body[data-widget-mode="band_activity"] .remote-rxfreq-section,
+  body[data-widget-mode="band_activity"] .remote-waterfall-section,
+  body[data-widget-mode="band_activity"] .remote-rest-section,
+  :host([data-widget-mode="band_activity"]) .remote-rxfreq-section,
+  :host([data-widget-mode="band_activity"]) .remote-waterfall-section,
+  :host([data-widget-mode="band_activity"]) .remote-rest-section { display: none; }
+  body[data-widget-mode="rx_freq"] .remote-band-activity-section,
+  body[data-widget-mode="rx_freq"] .remote-waterfall-section,
+  body[data-widget-mode="rx_freq"] .remote-rest-section,
+  :host([data-widget-mode="rx_freq"]) .remote-band-activity-section,
+  :host([data-widget-mode="rx_freq"]) .remote-waterfall-section,
+  :host([data-widget-mode="rx_freq"]) .remote-rest-section { display: none; }
+  body[data-widget-mode="waterfall"] .remote-band-activity-section,
+  body[data-widget-mode="waterfall"] .remote-rxfreq-section,
+  body[data-widget-mode="waterfall"] .remote-rest-section,
+  :host([data-widget-mode="waterfall"]) .remote-band-activity-section,
+  :host([data-widget-mode="waterfall"]) .remote-rxfreq-section,
+  :host([data-widget-mode="waterfall"]) .remote-rest-section { display: none; }
+  body[data-widget-mode="rest"] .remote-band-activity-section,
+  body[data-widget-mode="rest"] .remote-rxfreq-section,
+  body[data-widget-mode="rest"] .remote-waterfall-section,
+  :host([data-widget-mode="rest"]) .remote-band-activity-section,
+  :host([data-widget-mode="rest"]) .remote-rxfreq-section,
+  :host([data-widget-mode="rest"]) .remote-waterfall-section { display: none; }
+
+  /* Dashboard-widget context: dash-tile-header/dash-tile-body already
+     frames this tile -- drop .wsjtx-shell's own card styling so a widget
+     doesn't show a box inside a box. See the near-identical note in
+     _radio_control_body.html. color:inherit too -- .wsjtx-shell's own
+     #111 was only readable against its own background; once that's gone,
+     dark mode left near-black text on a near-black tile (confirmed live
+     across other families with the same pattern). */
+  body[data-widget-mode] .wsjtx-shell,
+  :host([data-widget-mode]) .wsjtx-shell { background: none; border: none; border-radius: 0; padding: 0.5rem 0.65rem; color: inherit; }
+  /* ...except form controls and the several explicitly light-background
+     sub-panels (sticky table header, Configure's .field-grid, Tx
+     message's .tx-msg-row, the .right-col panels): they keep their own
+     light background regardless of page theme, so color:inherit would
+     leave light dark-mode text on that light background (confirmed live
+     on the near-identical Radio Control case). */
+  body[data-widget-mode] .wsjtx-shell button, body[data-widget-mode] .remote-table thead th,
+  body[data-widget-mode] .right-col, body[data-widget-mode] .field-grid, body[data-widget-mode] .tx-msg-row,
+  :host([data-widget-mode]) .wsjtx-shell button, :host([data-widget-mode]) .remote-table thead th,
+  :host([data-widget-mode]) .right-col, :host([data-widget-mode]) .field-grid, :host([data-widget-mode]) .tx-msg-row { color: #111; }
+  /* Inputs/selects need an explicit background too, not just color -- a
+     container's own explicit background (.field-grid, .tx-msg-row, above)
+     doesn't reach into a nested <input>/<select>'s own native rendering,
+     so they were still picking up the browser's native dark-mode form
+     styling, just as unreadable against forced-dark text. */
+  body[data-widget-mode] .wsjtx-shell input, body[data-widget-mode] .wsjtx-shell select,
+  :host([data-widget-mode]) .wsjtx-shell input, :host([data-widget-mode]) .wsjtx-shell select { color: #111; background: #fff; }
+
+  /* Dashboard-widget context, band_activity/rx_freq modes: same
+     viewport-vs-tile mismatch as _live_monitor_body.html's near-identical
+     rule -- max-height:42vh doesn't track an actual resized tile, causing a
+     double scrollbar (dash-tile-body's own + this table's). Make the shell
+     a flex column filling the tile so the one visible table grows/scrolls
+     to fill exactly what's left after the title row -- single scrollbar. */
+  body[data-widget-mode="band_activity"] .wsjtx-shell, body[data-widget-mode="rx_freq"] .wsjtx-shell,
+  :host([data-widget-mode="band_activity"]) .wsjtx-shell, :host([data-widget-mode="rx_freq"]) .wsjtx-shell { display: flex; flex-direction: column; height: 100%; }
+  body[data-widget-mode="band_activity"] .panels-title-row, body[data-widget-mode="rx_freq"] .panels-title-row,
+  :host([data-widget-mode="band_activity"]) .panels-title-row, :host([data-widget-mode="rx_freq"]) .panels-title-row { flex: none; }
+  body[data-widget-mode="band_activity"] .remote-panels, body[data-widget-mode="rx_freq"] .remote-panels,
+  :host([data-widget-mode="band_activity"]) .remote-panels, :host([data-widget-mode="rx_freq"]) .remote-panels { flex: 1; min-height: 0; margin-bottom: 0; }
+  body[data-widget-mode="band_activity"] .remote-panel, body[data-widget-mode="rx_freq"] .remote-panel,
+  :host([data-widget-mode="band_activity"]) .remote-panel, :host([data-widget-mode="rx_freq"]) .remote-panel { display: flex; flex-direction: column; }
+  body[data-widget-mode="band_activity"] .remote-panel-scroll, body[data-widget-mode="rx_freq"] .remote-panel-scroll,
+  :host([data-widget-mode="band_activity"]) .remote-panel-scroll, :host([data-widget-mode="rx_freq"]) .remote-panel-scroll { max-height: none; flex: 1; min-height: 0; }
+
+  /* "rest" mode is a long stacked form (call/band/mode controls, Configure
+     fields, Tx message, status strip, queued-QSOs table) -- too much to
+     usefully flex-fill one table against, so it just relies on
+     dash-tile-body's own scrollbar for the whole thing, same as e.g. Radio
+     Control's or QSL Helper's widgets. Only fix needed here is dropping the
+     Queued QSOs table's own fixed 30vh cap, which -- same double-scroll bug
+     as above -- fought that outer scroll instead of just flowing with it. */
+  body[data-widget-mode="rest"] .remote-rest-section .remote-panel-scroll,
+  :host([data-widget-mode="rest"]) .remote-rest-section .remote-panel-scroll { max-height: none; }
+</style>
+
+<div class="wsjtx-shell">
+  <div class="panels-title-row">
+    <div class="remote-band-activity-section">Band Activity</div>
+    <div class="remote-rxfreq-section">Rx Frequency (within <input id="rxfreq-window" type="number" value="100" style="width:3.5em;"> Hz of your Rx DF)</div>
+  </div>
+  <div class="remote-panels">
+    <div class="remote-panel remote-band-activity-section">
+      <div class="remote-panel-scroll">
+        <table class="remote-table">
+          <thead><tr><th>UTC</th><th class="col-snr">dB</th><th>DT</th><th>Freq</th><th>Call</th><th>DXCC</th><th>Message</th></tr></thead>
+          <tbody id="band-activity-body"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="remote-panel remote-rxfreq-section">
+      <div class="remote-panel-scroll">
+        <table class="remote-table">
+          <thead><tr><th>UTC</th><th class="col-snr">dB</th><th>DT</th><th>Freq</th><th>Call</th><th>DXCC</th><th>Message</th></tr></thead>
+          <tbody id="rx-freq-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="waterfall-block" class="remote-waterfall-section">
+    <div class="waterfall-toolbar">
+      <label><input type="radio" name="wf-mode" value="decode" checked> Decode-based</label>
+      <label><input type="radio" name="wf-mode" value="spectrum_4hz"> Spectrum 4Hz</label>
+      <label><input type="radio" name="wf-mode" value="spectrum_1hz"> Spectrum 1Hz avg</label>
+      <label id="wf-rows-label">Rows <input id="wf-rows" type="number" min="2" max="120" value="4"></label>
+      <label id="spec-seconds-label" style="display:none;">Seconds <input id="spec-seconds" type="number" min="2" max="120" value="20"></label>
+      <a href="{{ url_for('remote.remote_waterfall_view') }}" target="_blank" class="waterfall-pop-link">Open in own tab &#8599;</a>
+    </div>
+    <p class="proc-hint" id="spectrum-warn" style="display:none; color:#b45309;"></p>
+    <div class="waterfall-shell" id="decode-shell">
+      <canvas id="waterfall-canvas" width="760" height="368"></canvas>
+    </div>
+    <div class="waterfall-shell" id="spectrum-shell" style="display:none;">
+      <div class="spectrum-ruler"><span>200</span><span>760</span><span>1320</span><span>1880</span><span>2440</span><span>3000 Hz</span></div>
+      <canvas id="spectrum-canvas" width="700" height="220"></canvas>
+    </div>
+    <p class="waterfall-caption">
+      Decode-based waterfall shows only signals actually decoded (colored by SNR), one row per decode cycle --
+      not a true spectrogram. Spectrum modes are a real FFT of WSJT-X's own audio input (200 Hz-3 kHz, 4 Hz/bin).
+    </p>
+  </div>
+
+  <div class="remote-rest-section">
+  <p style="font-size:0.85rem; margin: 0 0 0.5rem;">
+    <label>My call <input id="my-call" type="text" value="{{ my_call }}" size="10"></label>
+  </p>
+
+  <div class="band-row" id="remote-band-row" title="Tunes the rig directly via rigctld -- edit which presets show here on the Frequencies tab (check the Remote box)"></div>
+
+  <div class="btn-row" style="margin: 0.5rem 0;">
+    <label><input type="checkbox" disabled> CQ only</label>
+    <label><input type="checkbox" disabled> BP</label>
+    <button class="live" id="log-qso-btn" title="Preview and confirm logging the current QSO (WSJT-X can't confirm its own Log QSO dialog remotely)">Log QSO</button>
+    <button class="live" id="gui-stop-btn" title="Stop monitoring -- driven via AppleScript/Accessibility scripting of WSJT-X's own window, not UDP">Stop</button>
+    <label class="gui-toggle" title="Toggle monitoring on/off -- via GUI scripting, not UDP"><input type="checkbox" id="gui-monitor"> Monitor</label>
+    <button class="live" id="erase-btn" title="Sends WSJT-X's Clear message">Erase</button>
+    <label class="gui-toggle" title="Decode most recent Rx period -- via GUI scripting, not UDP"><input type="checkbox" id="gui-decode"> Decode</label>
+    <label class="gui-toggle gui-toggle-warn" title="Toggle Auto-Tx on/off -- this genuinely arms/starts real automatic transmissions"><input type="checkbox" id="gui-enable-tx"> Enable Tx</label>
+    <button class="live" id="halt-btn" title="Sends HaltTx">Halt Tx</button>
+    <label class="gui-toggle gui-toggle-warn" title="Toggle a pure Tx tone on/off -- this genuinely transmits a real carrier"><input type="checkbox" id="gui-tune"> Tune</label>
+    <label><input type="checkbox" id="wf-show" checked> Waterfall</label>
+  </div>
+  <p class="proc-hint" id="gui-bridge-hint"></p>
+
+  <div class="wsjtx-body">
+    <div class="mode-stack" id="mode-stack">
+      <button data-mode="FT8" class="active">FT8</button>
+      <button data-mode="FT4">FT4</button>
+      <button data-mode="MSK144">MSK144</button>
+      <button data-mode="Q65">Q65</button>
+      <button data-mode="JT65">JT65</button>
+      <button data-mode="JT9">JT9</button>
+    </div>
+
+    <div class="center-col">
+      <div class="freq-readout">
+        <span class="dot" id="rconn-dot"></span>
+        <span class="val" id="status-freq">--.------</span>
+      </div>
+      <div class="field-grid">
+        <div><label>DX Call</label><input id="cfg-dxcall" type="text"></div>
+        <div><label>DX Grid</label><input id="cfg-dxgrid" type="text"></div>
+        <div><label>Rx DF (Hz)</label><input id="cfg-rxdf" type="text" value="1500"></div>
+        <div><label>T/R period (s)</label><input id="cfg-tr" type="text" value="15"></div>
+        <div><label>Freq tolerance (Hz)</label><input id="cfg-tol" type="text" value="10"></div>
+        <div style="display:flex; align-items:flex-end; gap:0.6rem;">
+          <label style="display:flex; align-items:center; gap:0.3rem; font-size:0.78rem;"><input id="cfg-fast" type="checkbox"> Fast</label>
+          <label style="display:flex; align-items:center; gap:0.3rem; font-size:0.78rem;"><input id="cfg-genmsg" type="checkbox" checked> Gen msgs</label>
+        </div>
+        <div class="full">
+          <button id="cfg-submit" style="width:100%; padding:0.35rem;">Apply Configure</button>
+          <span class="action-result" id="cfg-result"></span>
+          <div class="warn">Configure's exact field layout is lower-confidence than the rest of this API -- test carefully.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="right-col">
+      <h3>Tx message</h3>
+      <div class="tx-msg-row">
+        <input id="ft-text" type="text" placeholder="e.g. VK2ABC VK2TDS RR73" maxlength="37">
+      </div>
+      <label style="font-size:0.78rem; display:flex; align-items:center; gap:0.3rem; margin-bottom:0.4rem;">
+        <input id="ft-send" type="checkbox"> Transmit immediately (not just fill the box)
+      </label>
+      <button id="ft-submit">Send</button>
+      <span class="action-result" id="ft-result"></span>
+      <p style="font-size:0.72rem; color:#888; margin-top:0.6rem;">
+        Double-click a row in Band Activity / Rx Frequency to reply to that station (equivalent to
+        double-clicking in WSJT-X itself).
+      </p>
+    </div>
+  </div>
+
+  <div class="status-strip rx" id="status-strip">
+    <span id="status-tx-label">Receiving</span>
+    <span class="sep">|</span>
+    <span id="status-mode">--</span>
+    <span class="sep">|</span>
+    <span>DX: <strong id="status-dx">--</strong> <span id="status-dxgrid"></span></span>
+    <span class="sep">|</span>
+    <span>Last Tx: <span id="status-lasttx">--</span></span>
+    <span class="sep">|</span>
+    <span id="rconn-text">connecting…</span>
+  </div>
+
+  <div class="right-col" style="margin-top:0.75rem;">
+    <h3>Queued QSOs <span style="font-weight:400;color:#888;font-size:0.75rem;">-- Send only works when run from the Mac MacLoggerDX is on</span></h3>
+    <div style="margin-bottom:0.4rem;">
+      <button id="queue-send-all">Send All Pending</button>
+      <button id="queue-clear-sent">Clear Sent</button>
+      <span class="action-result" id="queue-batch-result"></span>
+    </div>
+    <div class="remote-panel-scroll remote-queue-scroll">
+      <table class="remote-table">
+        <thead><tr><th>Queued</th><th>Call</th><th>Band</th><th>Mode</th><th>Status</th><th></th></tr></thead>
+        <tbody id="qso-queue-body"></tbody>
+      </table>
+    </div>
+  </div>
+  </div>
+
+  <div id="log-qso-overlay" class="modal-overlay" style="display:none;">
+    <div class="modal-box">
+      <h3>Log QSO</h3>
+      <p style="font-size:0.75rem; color:#888; margin-top:-0.4rem;">
+        WSJT-X can't confirm its own Log QSO dialog remotely, so this builds the record from its current
+        status instead. Review/edit, then add it to the queue below -- nothing reaches MacLoggerDX until
+        you separately click Send on a queued entry (from the Mac MacLoggerDX runs on).
+      </p>
+      <div id="log-qso-error" class="warn" style="display:none;"></div>
+      <div class="field-grid">
+        <div><label>My Call</label><input id="lq-mycall" type="text"></div>
+        <div><label>My Grid</label><input id="lq-mygrid" type="text"></div>
+        <div><label>Call</label><input id="lq-call" type="text"></div>
+        <div><label>Grid</label><input id="lq-grid" type="text"></div>
+        <div><label>Mode</label><input id="lq-mode" type="text"></div>
+        <div><label>Band</label><input id="lq-band" type="text"></div>
+        <div><label>RST Sent</label><input id="lq-rstsent" type="text"></div>
+        <div><label>RST Received</label><input id="lq-rstrcvd" type="text"></div>
+        <div><label>Frequency (MHz)</label><input id="lq-freq" type="text"></div>
+        <div><label>DXCC</label><input id="lq-dxcc" type="text"></div>
+        <div><label>DXCC ID</label><input id="lq-dxccid" type="text"></div>
+        <div><label>CQ Zone</label><input id="lq-cqzone" type="text"></div>
+        <div class="full"><label>Comments</label><input id="lq-comments" type="text"></div>
+      </div>
+      <div style="margin-top:0.6rem; display:flex; gap:0.5rem; align-items:center;">
+        <button id="log-qso-confirm">Add to Queue</button>
+        <button id="log-qso-cancel">Cancel</button>
+        <span class="action-result" id="log-qso-result"></span>
+      </div>
+    </div>
+  </div>
+
+  <div id="history-overlay" class="modal-overlay" style="display:none;">
+    <div class="modal-box">
+      <h3 id="history-title">Callsign</h3>
+      <div id="history-summary" class="history-summary"></div>
+      <div id="history-lines" class="history-lines"></div>
+      <div style="margin-top:0.6rem;">
+        <button id="history-close">Close</button>
+      </div>
+    </div>
+  </div>
+</div>

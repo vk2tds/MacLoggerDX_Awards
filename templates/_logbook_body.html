@@ -1,0 +1,184 @@
+<style>
+  .lb-shell { background: #ececec; border: 1px solid #b8b8b8; border-radius: 8px; padding: 0.75rem; font-family: -apple-system, "Segoe UI", sans-serif; color: #111; margin-bottom: 1rem; }
+  .lb-row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 0.6rem; font-size: 0.85rem; }
+  .lb-row input[type=number] { width: 5em; font-size: 0.85rem; padding: 0.2rem 0.3rem; }
+  .lb-row button { cursor: pointer; border: 1px solid #999; background: #f4f4f4; border-radius: 3px; padding: 0.3rem 0.7rem; font-size: 0.85rem; }
+  .lb-row button:hover { background: #e6e6e6; }
+  #lb-year { font-size: 0.85rem; padding: 0.25rem 0.4rem; }
+  .lb-month-row { display: flex; gap: 2px; flex-wrap: wrap; }
+  .lb-month-row button.current { background: #2e9c4a; color: #fff; border-color: #2e9c4a; }
+  .lb-month-row button.current:hover { background: #278a41; }
+
+  .lb-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .lb-table th, .lb-table td { padding: 0.2rem 0.5rem; text-align: left; white-space: nowrap; }
+  .lb-table thead th { position: sticky; top: 0; background: #eee; border-bottom: 1px solid #ccc; font-weight: 600; }
+  .lb-table tbody tr:hover { background: #f5f5f5; }
+  .lb-table-scroll { max-height: 50vh; overflow-y: auto; overflow-x: auto; }
+
+  .badge { display: inline-block; border-radius: 3px; padding: 0 0.35rem; font-size: 0.72rem; }
+  .badge-LoTW { background: #28a745; color: #fff; }
+  .badge-Card { background: #2f6fed; color: #fff; }
+  .badge-eQSL { background: #ddd; color: #555; }
+
+  .tag { display: inline-block; border-radius: 3px; padding: 0 0.3rem; font-size: 0.68rem; margin-left: 0.25rem; }
+  .tag-new { background: #ffc107; color: #333; }
+
+  .action-result { font-size: 0.78rem; margin-left: 0.5rem; }
+  .action-result.ok { color: #2e7d32; }
+  .action-result.err { color: #c62828; }
+  .lb-empty { color: #888; font-size: 0.85rem; }
+
+  .call-link { text-decoration: underline dotted; cursor: pointer; }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
+  .modal-box { background: #fff; border-radius: 6px; padding: 1rem 1.25rem; width: min(560px, 92vw); max-height: 85vh; overflow-y: auto; box-shadow: 0 8px 30px rgba(0,0,0,0.3); color: #111; }
+  .modal-box h3 { margin: 0 0 0.3rem; }
+  .history-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.4rem; font-size: 0.82rem; margin: 0.6rem 0; }
+  .history-summary div { background: #f4f4f4; border-radius: 4px; padding: 0.35rem 0.5rem; }
+  .history-lines { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; max-height: 40vh; overflow-y: auto; background: #fafafa; padding: 0.5rem; border-radius: 4px; }
+  .history-lines div.tx { color: #1565c0; }
+
+  /* Only relevant on the Dashboard widget variants (see
+     templates/logbook_widget.html) -- body[data-widget-mode] is never set
+     on the full page, so both sections always show there unchanged. The
+     Confirmations table's Call column isn't a call-link (see logbook.js),
+     so the history modal only needs to live in the Recent QSOs section.
+     Each rule is duplicated as a :host([data-widget-mode=...]) selector too
+     -- a shadow-DOM-mounted applet has no <body> element for the body[...]
+     half to ever match, and sets data-widget-mode on the shadow host
+     itself instead; :host() is valid CSS everywhere but only *matches*
+     inside a shadow tree, so one rule covers both the standalone/iframe
+     page and the shadow-mounted applet without duplicating the block. */
+  body[data-widget-mode="recent"] .lb-confirm-section,
+  :host([data-widget-mode="recent"]) .lb-confirm-section { display: none; }
+  body[data-widget-mode="confirmations"] .lb-recent-section,
+  :host([data-widget-mode="confirmations"]) .lb-recent-section { display: none; }
+
+  /* Dashboard-widget context: dash-tile-header/dash-tile-body already
+     frames this tile -- drop .lb-shell's own card styling so a widget
+     doesn't show a box inside a box. See the near-identical note in
+     _radio_control_body.html. color:inherit too -- .lb-shell's own #111
+     was only readable against its own background; once that's gone, dark
+     mode left near-black text on a near-black tile (confirmed live). */
+  body[data-widget-mode] .lb-shell,
+  :host([data-widget-mode]) .lb-shell { background: none; border: none; border-radius: 0; padding: 0.5rem 0.65rem; color: inherit; }
+  /* ...except form controls and the sticky table header: they keep their
+     own light background regardless of page theme, so color:inherit would
+     leave light dark-mode text on that light background (confirmed live
+     on the near-identical Radio Control case). Inputs/selects need an
+     explicit background too, not just color -- they have none of their
+     own, so they were picking up the browser's native dark-mode form
+     styling instead, which is just as unreadable against forced-dark
+     text. */
+  body[data-widget-mode] .lb-shell button, body[data-widget-mode] .lb-table thead th,
+  :host([data-widget-mode]) .lb-shell button, :host([data-widget-mode]) .lb-table thead th { color: #111; }
+  body[data-widget-mode] .lb-shell input, body[data-widget-mode] .lb-shell select,
+  :host([data-widget-mode]) .lb-shell input, :host([data-widget-mode]) .lb-shell select { color: #111; background: #fff; }
+
+  /* Dashboard-widget context: the full page's max-height:50vh is sized
+     against the viewport, not the actual tile height -- inside a resized
+     tile that left dash-tile-body AND this table independently scrolling
+     at once. Make the section a flex column filling the tile, the search
+     box and the form rows keep their natural size, and only the table
+     itself grows/scrolls to fill what's left -- single scrollbar, tracks a
+     GridStack resize live. See the near-identical note in
+     _live_monitor_body.html. */
+  body[data-widget-mode="recent"] .lb-recent-section, body[data-widget-mode="confirmations"] .lb-confirm-section,
+  :host([data-widget-mode="recent"]) .lb-recent-section, :host([data-widget-mode="confirmations"]) .lb-confirm-section { display: flex; flex-direction: column; height: 100%; }
+  body[data-widget-mode="recent"] .lb-search-shell, body[data-widget-mode="recent"] .lb-recent-shell, body[data-widget-mode="confirmations"] .lb-confirm-shell,
+  :host([data-widget-mode="recent"]) .lb-search-shell, :host([data-widget-mode="recent"]) .lb-recent-shell, :host([data-widget-mode="confirmations"]) .lb-confirm-shell { flex: none; }
+  body[data-widget-mode="recent"] .lb-recent-shell, body[data-widget-mode="confirmations"] .lb-confirm-shell,
+  :host([data-widget-mode="recent"]) .lb-recent-shell, :host([data-widget-mode="confirmations"]) .lb-confirm-shell { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  body[data-widget-mode="recent"] .lb-table-scroll, body[data-widget-mode="confirmations"] .lb-table-scroll,
+  :host([data-widget-mode="recent"]) .lb-table-scroll, :host([data-widget-mode="confirmations"]) .lb-table-scroll { max-height: none; flex: 1; min-height: 0; }
+  /* .lb-recent-shell/.lb-confirm-shell are themselves flex columns (above)
+     so their own children -- the heading, the search/filter rows, the
+     "Triggers..." paragraph -- are flex items too and would otherwise
+     shrink right along with .lb-table-scroll under real space pressure
+     (confirmed live: a short tile squeezed everything, including the
+     table, down toward 0 instead of only the table). Pin them to their
+     natural size so only the table actually gives up space. */
+  body[data-widget-mode="recent"] .lb-recent-shell > :not(.lb-table-scroll), body[data-widget-mode="confirmations"] .lb-confirm-shell > :not(.lb-table-scroll),
+  :host([data-widget-mode="recent"]) .lb-recent-shell > :not(.lb-table-scroll), :host([data-widget-mode="confirmations"]) .lb-confirm-shell > :not(.lb-table-scroll) { flex: none; }
+</style>
+
+<div class="lb-recent-section">
+<div class="lb-shell lb-search-shell">
+  <h3 style="margin: 0 0 0.5rem;">Search</h3>
+  <div class="lb-row">
+    <input type="text" id="lb-search-call" placeholder="Callsign" style="text-transform:uppercase;">
+    <button id="lb-search-btn">Search</button>
+  </div>
+</div>
+
+<div class="lb-shell lb-recent-shell">
+  <h3 style="margin: 0 0 0.5rem;">Recent QSOs</h3>
+  <div class="lb-row">
+    <label>Last <input type="number" id="lb-hours" value="36" min="1"> hours</label>
+    <button id="lb-recent-refresh">Refresh</button>
+    <label><input type="checkbox" id="lb-live"> Live</label>
+    <span id="lb-live-status" style="font-size:0.78rem; color:#888;"></span>
+    <span class="action-result" id="lb-recent-result"></span>
+  </div>
+  <div class="lb-row">
+    <select id="lb-year"></select>
+    <div class="lb-month-row" id="lb-month-row">
+      <button data-month="1">Jan</button>
+      <button data-month="2">Feb</button>
+      <button data-month="3">Mar</button>
+      <button data-month="4">Apr</button>
+      <button data-month="5">May</button>
+      <button data-month="6">Jun</button>
+      <button data-month="7">Jul</button>
+      <button data-month="8">Aug</button>
+      <button data-month="9">Sep</button>
+      <button data-month="10">Oct</button>
+      <button data-month="11">Nov</button>
+      <button data-month="12">Dec</button>
+    </div>
+  </div>
+  <div class="lb-table-scroll">
+    <table class="lb-table">
+      <thead><tr><th>UTC</th><th>Band</th><th>Mode</th><th>Call</th><th>DXCC</th><th>Grid</th><th>RST S</th><th>RST R</th><th>QSL</th></tr></thead>
+      <tbody id="lb-recent-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<div id="history-overlay" class="modal-overlay" style="display:none;">
+  <div class="modal-box">
+    <h3 id="history-title">Callsign</h3>
+    <div id="history-summary" class="history-summary"></div>
+    <div id="history-lines" class="history-lines"></div>
+    <div style="margin-top:0.6rem;">
+      <button id="history-close">Close</button>
+    </div>
+  </div>
+</div>
+</div>
+
+<div class="lb-confirm-section">
+<div class="lb-shell lb-confirm-shell">
+  <h3 style="margin: 0 0 0.5rem;">Confirmations</h3>
+  <div class="lb-row">
+    <button id="lb-check-lotw">Check LoTW Now</button>
+    <button id="lb-check-eqsl" style="display:none;">Check eQSL Now</button>
+    <span class="action-result" id="lb-check-result"></span>
+  </div>
+  <p style="font-size:0.75rem; color:#888; margin:0 0 0.6rem;">
+    Triggers MacLoggerDX's own confirmation check (same as its menu) -- it accepts the request
+    immediately, but the actual LoTW/eQSL download happens in MacLoggerDX itself and may take a
+    little while. Refresh the table below afterward to see new confirmations.
+  </p>
+  <div class="lb-row">
+    <label>Last <input type="number" id="lb-months" value="3" min="1"> months</label>
+    <button id="lb-confirm-refresh">Refresh</button>
+    <span class="action-result" id="lb-confirm-result"></span>
+  </div>
+  <div class="lb-table-scroll">
+    <table class="lb-table">
+      <thead><tr><th>Confirmed</th><th>Via</th><th>Call</th><th>DXCC</th><th>Band</th><th>Mode</th><th>QSO date</th></tr></thead>
+      <tbody id="lb-confirm-body"></tbody>
+    </table>
+  </div>
+</div>
+</div>

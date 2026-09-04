@@ -42,11 +42,13 @@ regardless of whether any browser tab was even looking at it.
 
 from __future__ import annotations
 
+import atexit
 import collections
 import logging
 import os
 import re
 import threading
+import time
 from typing import Optional
 
 import numpy as np
@@ -61,6 +63,66 @@ try:
 except ImportError:
     sd = None
     _SOUNDDEVICE_AVAILABLE = False
+
+# Confirmed live (2026-08-15): when the werkzeug reloader's file-watcher
+# thread calls sys.exit() to restart on a code change, CPython's normal
+# shutdown sequence runs atexit handlers -- and sounddevice registers its
+# own atexit hook (Pa_Terminate(), which closes any still-open PortAudio
+# streams) at import time. If a stream was left open (someone was actively
+# viewing the waterfall) and the underlying CoreAudio HAL was in a wedged
+# state -- observed right after using Loopback.app, which creates/tears
+# down virtual audio devices -- that close call hangs *inside CoreAudio's
+# own mutex*, permanently: unkillable via signals, un-timeout-able from
+# pure Python, and blocking the entire process (confirmed via `sample`:
+# the main thread was stuck in atexit_callfuncs -> Pa_Terminate ->
+# Pa_CloseStream -> ... -> HALB_Mutex::Lock()). The whole app was
+# unresponsive to HTTP for as long as that lasted, and the reloader's
+# parent process -- waiting on this exact child -- never got to spawn a
+# replacement either.
+#
+# atexit handlers run LIFO, so registering ours here (after the
+# sounddevice import above) makes it run *before* sounddevice's own
+# Pa_Terminate() hook. It closes the stream in a background thread with a
+# hard deadline; if that doesn't return in time, os._exit() force-kills
+# the process immediately, skipping the rest of Python's shutdown
+# (including the same Pa_Terminate() call that would otherwise hang the
+# same way) -- under both the werkzeug reloader and launchd's KeepAlive,
+# an unclean-but-prompt exit gets a fresh process going again within
+# seconds instead of an indefinite hang.
+_ATEXIT_CLOSE_TIMEOUT_S = 3.0
+
+
+def _atexit_close_stream():
+    spectrum = _spectrum
+    if spectrum is None or spectrum.stream is None:
+        return
+    stream = spectrum.stream
+
+    def _close():
+        try:
+            stream.abort(ignore_errors=True)
+            stream.close(ignore_errors=True)
+        except Exception:
+            pass
+
+    # Deliberately not taking spectrum._lock here -- the whole point of
+    # this handler is to guarantee the process exits promptly no matter
+    # what else is going on, and waiting on a lock that might itself be
+    # held by a thread stuck in the same CoreAudio call would just add a
+    # second way to hang forever.
+    closer = threading.Thread(target=_close, name="audio-spectrum-atexit-close", daemon=True)
+    closer.start()
+    closer.join(timeout=_ATEXIT_CLOSE_TIMEOUT_S)
+    if closer.is_alive():
+        log.error(
+            "Audio stream close hung for %.0fs during shutdown (likely a wedged CoreAudio HAL) -- "
+            "force-exiting instead of waiting forever.", _ATEXIT_CLOSE_TIMEOUT_S,
+        )
+        os._exit(1)
+
+
+if _SOUNDDEVICE_AVAILABLE:
+    atexit.register(_atexit_close_stream)
 
 WSJTX_INI_PATH = os.path.expanduser("~/Library/Preferences/WSJT-X.ini")
 
@@ -116,6 +178,22 @@ class AudioSpectrum:
     END_BIN = int(END_HZ / BIN_HZ)      # 750
     AVG_BLOCKS = 4  # -> ~1 update/sec from 4x 250ms blocks
 
+    # A block should arrive every 250ms while the stream is genuinely
+    # capturing -- confirmed live (2026-08-14) that a USB audio interface
+    # (the radio's own CODEC) briefly losing power can leave the
+    # sd.InputStream itself perfectly healthy (open, no exception, no error
+    # surfaced anywhere) while CoreAudio silently stops actually delivering
+    # samples to it -- the waterfall just goes blank forever with no error
+    # shown, since nothing in the stream API itself ever reports the
+    # hardware event. WATCHDOG_INTERVAL_S/STALE_THRESHOLD_S drive a
+    # background thread (started once, on first stream open) that notices
+    # the callback has gone quiet and transparently reopens the stream --
+    # see _watchdog_loop()/_reopen_stream_locked() below. 6s is generous
+    # (24 missed blocks) to avoid false positives from ordinary scheduling
+    # jitter while still recovering well within a minute of a real outage.
+    WATCHDOG_INTERVAL_S = 3.0
+    STALE_THRESHOLD_S = 6.0
+
     def __init__(self, device_name: Optional[str]):
         self.device_name = device_name
         self.device_index: Optional[int] = None
@@ -126,6 +204,8 @@ class AudioSpectrum:
         self._block_count = 0
         self._listener_count = 0
         self._lock = threading.Lock()
+        self._last_callback_ts: Optional[float] = None
+        self._watchdog_started = False
 
     def resolve_device(self):
         """Validates sounddevice/device availability without opening the
@@ -164,11 +244,68 @@ class AudioSpectrum:
                 blocksize=self.BLOCK_SIZE, dtype="float32", callback=self._on_audio,
             )
             self.stream.start()
+            # Seed this now, not just on the first real callback -- gives
+            # the watchdog a full STALE_THRESHOLD_S grace window before a
+            # freshly (re)opened stream could be flagged stale.
+            self._last_callback_ts = time.monotonic()
+            self._start_watchdog()
             log.info("Audio spectrum capture started on %r (device %d)", self.device_name, self.device_index)
         except Exception as exc:
             self.error = f"Failed to open audio input stream: {exc}"
             log.exception(self.error)
             self.stream = None
+
+    def _start_watchdog(self):
+        """Starts the background staleness-watchdog thread exactly once for
+        this AudioSpectrum instance's lifetime (idempotent across however
+        many times the stream itself gets opened/closed/reopened as
+        listeners come and go)."""
+        if self._watchdog_started:
+            return
+        self._watchdog_started = True
+        threading.Thread(target=self._watchdog_loop, name="audio-spectrum-watchdog", daemon=True).start()
+
+    def _watchdog_loop(self):
+        while True:
+            time.sleep(self.WATCHDOG_INTERVAL_S)
+            with self._lock:
+                if self.stream is None or self._last_callback_ts is None:
+                    continue  # not currently capturing -- nothing to watch
+                silent_for = time.monotonic() - self._last_callback_ts
+                if silent_for > self.STALE_THRESHOLD_S:
+                    log.warning(
+                        "Audio spectrum capture on %r has gone silent for %.1fs with no error reported -- "
+                        "likely the USB audio device lost power/reconnected underneath an otherwise-healthy "
+                        "stream. Reopening it.", self.device_name, silent_for,
+                    )
+                    self._reopen_stream_locked()
+
+    def _reopen_stream_locked(self):
+        """Closes and reopens the capture stream. Caller must already hold
+        self._lock. Re-resolves the device index first rather than blindly
+        retrying the cached one -- a reconnect can shift index assignments,
+        not just leave a stream silently dead at an otherwise-still-correct
+        index (both were observed possible outcomes of the same kind of
+        power event)."""
+        if self.stream is not None:
+            try:
+                self.stream.stop()
+                self.stream.close()
+            except Exception:
+                pass
+            self.stream = None
+        self.error = None
+        try:
+            self.device_index = _find_input_device_index(self.device_name)
+        except Exception as exc:
+            self.error = f"Failed to enumerate audio devices: {exc}"
+            log.exception(self.error)
+            return
+        if self.device_index is None:
+            self.error = f"Audio input device {self.device_name!r} (WSJT-X's configured SoundInName) not found"
+            log.warning(self.error)
+            return
+        self._open_stream()
 
     def add_listener(self):
         """Called when a browser client starts viewing a spectrum mode --
@@ -199,6 +336,7 @@ class AudioSpectrum:
             log.info("Audio spectrum capture stopped (no listeners)")
 
     def _on_audio(self, indata, frames, time_info, status):
+        self._last_callback_ts = time.monotonic()
         if status:
             log.debug("sounddevice status: %s", status)
         try:

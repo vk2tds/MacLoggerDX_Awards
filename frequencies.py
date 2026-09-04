@@ -47,6 +47,16 @@ def frequencies_view():
     return render_template("frequencies.html")
 
 
+@frequencies_bp.route("/frequencies/widget")
+def frequencies_widget():
+    """Dashboard widget: the whole Frequencies screen, unsplit -- see
+    templates/frequencies_widget.html and dashboard.py's module docstring
+    for the overall widget pattern. Unlike the multi-section pages, this
+    one has no sub-widgets to switch between (see the user's original
+    widget list), so there's no data-widget-mode/CSS-hiding here."""
+    return render_template("frequencies_widget.html")
+
+
 @frequencies_bp.route("/frequencies/presets", methods=["GET", "POST"])
 def frequencies_presets():
     store = _preset_store()

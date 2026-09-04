@@ -1,0 +1,212 @@
+<style>
+  .radio-shell { background: #ececec; border: 1px solid #b8b8b8; border-radius: 8px; padding: 0.75rem; font-family: -apple-system, "Segoe UI", sans-serif; color: #111; max-width: 46em; }
+  .radio-conn { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; margin-bottom: 0.6rem; }
+  .radio-conn .dot { width: 0.8rem; height: 0.8rem; border-radius: 50%; background: #999; flex-shrink: 0; }
+  .radio-conn .dot.up { background: #2e9c4a; }
+  .radio-conn .dot.down { background: #c62828; }
+  .radio-conn .err { color: #b45309; }
+
+  .freq-readout { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
+  .freq-readout .val { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.9rem; font-weight: 600; background: #000; color: #ffcc33; padding: 0.15rem 0.7rem; border-radius: 3px; letter-spacing: 1px; }
+  .freq-readout .band-badge { font-size: 0.85rem; color: #555; background: #fff; border: 1px solid #ccc; border-radius: 3px; padding: 0.15rem 0.5rem; }
+
+  .radio-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
+  .radio-row input[type=text] { font-size: 0.9rem; padding: 0.25rem 0.4rem; }
+  .radio-row button { cursor: pointer; border: 1px solid #999; background: #f4f4f4; border-radius: 3px; padding: 0.3rem 0.7rem; font-size: 0.85rem; }
+  .radio-row button:hover { background: #e6e6e6; }
+
+  .band-row { display: flex; gap: 2px; flex-wrap: wrap; margin-bottom: 0.6rem; }
+  .band-row button { flex: 1 1 auto; min-width: 3rem; padding: 0.4rem 0.2rem; border: 1px solid #999; background: #e8e8e8; cursor: pointer; font-size: 0.8rem; border-radius: 2px; }
+  .band-row button:hover { background: #d8d8d8; }
+  .band-row button.current { background: #2e9c4a; color: #fff; border-color: #2e9c4a; }
+
+  .mode-row { display: flex; gap: 2px; flex-wrap: wrap; margin-bottom: 0.6rem; }
+  .mode-row button { padding: 0.35rem 0.7rem; border: 1px solid #999; background: #e8e8e8; cursor: pointer; font-size: 0.82rem; border-radius: 2px; }
+  .mode-row button:hover { background: #d8d8d8; }
+  .mode-row button.current { background: #2f6fed; color: #fff; border-color: #2f6fed; }
+
+  .ptt-btn { font-size: 1rem; font-weight: 600; padding: 0.6rem 1.5rem; border-radius: 4px; border: 1px solid #999; background: #e8e8e8; cursor: pointer; }
+  .ptt-btn.keyed { background: #c62828; color: #fff; border-color: #c62828; }
+  .ptt-warn { font-size: 0.72rem; color: #888; margin-left: 0.75rem; }
+
+  .action-result { font-size: 0.78rem; margin-left: 0.5rem; }
+  .action-result.ok { color: #2e7d32; }
+  .action-result.err { color: #c62828; }
+
+  .smeter-wrap { margin-bottom: 0.6rem; }
+  .smeter-track { height: 14px; background: #ddd; border: 1px solid #999; border-radius: 3px; overflow: hidden; }
+  .smeter-fill { height: 100%; width: 0%; background: linear-gradient(to right, #2e9c4a, #e6a817 70%, #c62828); }
+  .smeter-label { font-size: 0.78rem; color: #333; margin-top: 0.2rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  .radio-row input[type=number] { font-size: 0.9rem; padding: 0.25rem 0.4rem; width: 6em; }
+
+  .radio-row select { font-size: 0.9rem; padding: 0.2rem 0.3rem; }
+  .radio-row label { display: flex; align-items: center; gap: 0.3rem; font-size: 0.85rem; }
+  .proc-log { background: #111; color: #ddd; font-size: 0.72rem; padding: 0.5rem; max-height: 200px; overflow: auto; white-space: pre-wrap; border-radius: 4px; }
+  .proc-summary { cursor: pointer; font-size: 0.82rem; color: #555; }
+  .proc-hint { font-size: 0.72rem; color: #888; }
+
+  /* Only relevant on the Dashboard widget variants (see
+     templates/radio_widget.html) -- body[data-widget-mode] is never set on
+     the full page, so both sections always show there unchanged. */
+  body[data-widget-mode="control"] .rigctld-section,
+  :host([data-widget-mode="control"]) .rigctld-section { display: none; }
+  body[data-widget-mode="proc"] .radio-control-section,
+  :host([data-widget-mode="proc"]) .radio-control-section { display: none; }
+  /* "freq" mode -- just the connection dot + big frequency/mode/band
+     readout, everything else (S-meter, all the Set/RIT/XIT/power/PTT rows)
+     hidden. A minimal at-a-glance tile for a big screen, not a control
+     surface -- for setting anything, use the full "Radio: Control" widget
+     or the /radio page itself. */
+  body[data-widget-mode="freq"] .radio-extra-controls-section,
+  body[data-widget-mode="freq"] .rigctld-section,
+  :host([data-widget-mode="freq"]) .radio-extra-controls-section,
+  :host([data-widget-mode="freq"]) .rigctld-section { display: none; }
+
+  /* Dashboard-widget context (data-widget-mode present, any value --
+     single-view widget routes now always set it to "" even though they
+     have no actual modes, purely so this selector can detect "is this a
+     widget" reliably): dash-tile-header/dash-tile-body in dashboard.html
+     already frames this tile, so drop .radio-shell's own card styling to
+     avoid a box-in-a-box look. The full page (templates/radio.html) sets no
+     such attribute at all, so it keeps the card there where there's no
+     other framing around it. color:inherit too -- .radio-shell's own #111
+     was only readable against its own background; once that's gone, dark
+     mode left near-black text on a near-black tile (confirmed live). The
+     LCD-style .freq-readout .val (black bg, amber text) and badges/tags
+     with their own explicit background are untouched. */
+  body[data-widget-mode] .radio-shell,
+  :host([data-widget-mode]) .radio-shell { background: none; border: none; border-radius: 0; padding: 0.5rem 0.65rem; max-width: none; color: inherit; }
+  /* ...except form controls: .radio-shell's buttons/inputs keep their own
+     light grey/white background regardless of page theme (a deliberate
+     "control panel" look predating this session, same as the LCD readout
+     above), so color:inherit would leave light dark-mode text on that
+     light background -- confirmed live (band/mode buttons went washed-out
+     and unreadable). Force them back to dark text explicitly instead of
+     inheriting. */
+  body[data-widget-mode] .radio-shell button,
+  :host([data-widget-mode]) .radio-shell button { color: #111; }
+  /* Inputs/selects go a step further (explicit background too, not just
+     color): unlike buttons, they have no explicit background of their own
+     at all, so they were picking up the browser's *native* dark-mode form
+     styling (a dark input background) once dark mode was actually
+     reachable on this tile -- dark text (above) on that would have been
+     just as unreadable as light text was. */
+  body[data-widget-mode] .radio-shell input, body[data-widget-mode] .radio-shell select,
+  :host([data-widget-mode]) .radio-shell input, :host([data-widget-mode]) .radio-shell select { color: #111; background: #fff; }
+</style>
+
+<div class="radio-shell radio-control-section" style="margin-bottom: 1rem;">
+  <div class="radio-conn">
+    <span class="dot" id="conn-dot"></span>
+    <span id="conn-text">connecting…</span>
+  </div>
+
+  <div class="freq-readout">
+    <span class="val" id="freq-val">--.------</span>
+    <span class="band-badge" id="mode-val">--</span>
+    <span class="band-badge" id="band-val">--</span>
+  </div>
+
+  <div class="radio-extra-controls-section">
+  <div class="smeter-wrap">
+    <div class="smeter-track"><div class="smeter-fill" id="smeter-fill"></div></div>
+    <div class="smeter-label" id="smeter-label">S-meter: --</div>
+  </div>
+
+  <div class="radio-row">
+    <label>Frequency (MHz) <input id="freq-input" type="text" size="10" placeholder="14.074000"></label>
+    <button id="freq-set-btn">Set</button>
+    <span class="action-result" id="freq-result"></span>
+  </div>
+
+  <div class="mode-row" id="mode-row">
+    <button data-mode="USB">USB</button>
+    <button data-mode="LSB">LSB</button>
+    <button data-mode="CW">CW</button>
+    <button data-mode="AM">AM</button>
+    <button data-mode="FM">FM</button>
+    <button data-mode="PKTUSB">DATA (PKTUSB)</button>
+    <span class="action-result" id="mode-result"></span>
+  </div>
+
+  <div class="band-row" id="band-row" title="QSY to the standard FT8 calling frequency for the band">
+    <button data-band="160M">160</button><button data-band="80M">80</button><button data-band="60M">60</button>
+    <button data-band="40M">40</button><button data-band="30M">30</button><button data-band="20M">20</button>
+    <button data-band="17M">17</button><button data-band="15M">15</button><button data-band="12M">12</button>
+    <button data-band="10M">10</button><button data-band="6M">6</button><button data-band="2M">2</button>
+  </div>
+
+  <div class="radio-row">
+    <label>RIT (Hz) <input id="rit-input" type="number" step="10" value="0"></label>
+    <button id="rit-set-btn">Set</button>
+    <button id="rit-clear-btn">Clear</button>
+    <span class="action-result" id="rit-result"></span>
+  </div>
+
+  <div class="radio-row">
+    <label>XIT (Hz) <input id="xit-input" type="number" step="10" value="0"></label>
+    <button id="xit-set-btn">Set</button>
+    <button id="xit-clear-btn">Clear</button>
+    <span class="action-result" id="xit-result"></span>
+  </div>
+
+  <div class="radio-row">
+    <label>RF Power (W) <input id="power-input" type="number" step="1" min="0" placeholder="--"></label>
+    <button id="power-set-btn">Set</button>
+    <span class="proc-hint" id="power-readout"></span>
+    <span class="action-result" id="power-result"></span>
+  </div>
+
+  <div class="radio-row">
+    <button class="ptt-btn" id="ptt-btn">Key Tx</button>
+    <span class="ptt-warn">Directly keys the transmitter via rigctld -- not gated through WSJT-X at all.</span>
+    <span class="action-result" id="ptt-result"></span>
+  </div>
+  </div>
+</div>
+
+<div class="radio-shell rigctld-section">
+  <h3 style="margin: 0 0 0.5rem;">rigctld process</h3>
+  <div class="radio-conn">
+    <span class="dot" id="proc-dot"></span>
+    <span id="proc-text">checking…</span>
+  </div>
+
+  <div class="radio-row">
+    <button id="proc-start-btn">Start</button>
+    <button id="proc-stop-btn">Stop</button>
+    <button id="proc-restart-btn">Restart</button>
+    <span class="action-result" id="proc-action-result"></span>
+  </div>
+
+  <div class="radio-row">
+    <label>Rig model <select id="proc-rig-model" style="min-width: 18em;"><option value="">Loading…</option></select></label>
+  </div>
+  <div class="radio-row">
+    <label>Serial device
+      <input id="proc-device" list="proc-device-list" type="text" placeholder="/dev/cu.usbserial-XXXX" style="min-width: 16em;">
+    </label>
+    <datalist id="proc-device-list"></datalist>
+  </div>
+  <div class="radio-row">
+    <label>Baud <input id="proc-baud" type="text" size="6" placeholder="rig default"></label>
+    <label>Listen host <input id="proc-host" type="text" size="10" value="127.0.0.1"></label>
+    <label>Listen port <input id="proc-port" type="text" size="6" value="4532"></label>
+  </div>
+  <div class="radio-row">
+    <label>Extra args <input id="proc-extra" type="text" size="34" placeholder="e.g. -p /dev/cu.usbserial-XXXX"></label>
+  </div>
+  <div class="radio-row">
+    <label>Binary path override <input id="proc-binary" type="text" size="34" placeholder="auto-detected"></label>
+    <button id="proc-save-btn">Save Config</button>
+    <span class="action-result" id="proc-save-result"></span>
+  </div>
+  <p class="proc-hint">Config changes take effect on the next Start/Restart -- an already-running rigctld keeps its
+    current settings until then.</p>
+
+  <details id="proc-log-details">
+    <summary class="proc-summary">rigctld log (last 60 lines)</summary>
+    <pre class="proc-log" id="proc-log"></pre>
+  </details>
+</div>

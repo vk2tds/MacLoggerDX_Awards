@@ -28,8 +28,8 @@
     "method": "",
     "cost": "",
     "notes": "In log",
-    "status": "pending",
-    "updated": "2026-07-14T20:18:28"
+    "status": "done",
+    "updated": "2026-08-29T19:39:45"
   },
   {
     "call": "TL8GD",
@@ -46,5 +46,85 @@
     "notes": "Emailed. Not on clublog",
     "status": "pending",
     "updated": "2026-07-15T15:27:04"
+  },
+  {
+    "call": "TT1GD",
+    "method": "OQRS",
+    "cost": "",
+    "notes": "Ordered",
+    "status": "done",
+    "updated": "2026-08-29T19:39:45"
+  },
+  {
+    "call": "YV6BXN",
+    "method": "OQRS",
+    "cost": "2",
+    "notes": "Ordered",
+    "status": "done",
+    "updated": "2026-08-29T19:39:45"
+  },
+  {
+    "call": "OA4ENG",
+    "method": "OQRS",
+    "cost": "5",
+    "notes": "",
+    "status": "done",
+    "updated": "2026-08-29T19:39:45"
+  },
+  {
+    "call": "VP2EWE",
+    "method": "OQRS",
+    "cost": "",
+    "notes": "",
+    "status": "done",
+    "updated": "2026-08-29T19:39:45"
+  },
+  {
+    "call": "VP2MAA",
+    "method": "OQRS",
+    "cost": "",
+    "notes": "",
+    "status": "done",
+    "updated": "2026-08-29T19:39:45"
+  },
+  {
+    "call": "E6AM",
+    "method": "OQRS",
+    "cost": "",
+    "notes": "",
+    "status": "done",
+    "updated": "2026-08-29T19:39:45"
+  },
+  {
+    "call": "Z62NS",
+    "method": "OQRS",
+    "cost": "",
+    "notes": "",
+    "status": "pending",
+    "updated": "2026-08-29T08:36:21"
+  },
+  {
+    "call": "TN8GD",
+    "method": "OQRS",
+    "cost": "",
+    "notes": "",
+    "status": "done",
+    "updated": "2026-09-04T08:19:33"
+  },
+  {
+    "call": "Z81D",
+    "method": "OQRS",
+    "cost": "",
+    "notes": "",
+    "status": "done",
+    "updated": "2026-08-29T19:39:45"
+  },
+  {
+    "call": "V4/SP9FIH",
+    "method": "OQRS",
+    "cost": "",
+    "notes": "",
+    "status": "done",
+    "updated": "2026-08-29T19:39:45"
   }
 ]

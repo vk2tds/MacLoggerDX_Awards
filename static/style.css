@@ -87,6 +87,8 @@ ul.leaves { list-style: none; margin: 0.2rem 0; padding: 0; color: var(--muted);
 .grid-scroll { overflow-x: auto; }
 .challenge-grid td, .challenge-grid th { white-space: nowrap; }
 .country-cell { position: sticky; left: 0; background: var(--bg); }
+.totals-row td { font-weight: 600; text-align: center; border-bottom: 2px solid var(--border); }
+.totals-row .country-cell { text-align: left; }
 
 .tooltip { position: relative; display: inline-block; border-bottom: 1px dotted var(--muted); }
 .tooltip .tooltiptext {

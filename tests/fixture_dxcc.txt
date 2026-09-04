@@ -10,18 +10,29 @@ Notes:
     Prefix              Entity                         Continent ITU   CQ    Code
     ___________________ ________________________________________ _____ _____ ___
     3A                 Monaco                             EU    27    14    260
-    F                  France                             EU    27    14    227
+    F,TM               France                             EU    27    14    227
     G,M,2E             United Kingdom of Great Britain    EU    27    14    223
-    JA-JS,7J-7N        Japan                              AS    45    25    339
+    JA-JS,7J-7N,8J,8N  Japan                              AS    45    25    339
     K,W,N,AA-AK#       United States of America           NA    06-08 03-05 291
     KG4#               Guantanamo Bay                     NA    11    08    105
-    VK#                Australia                          OC    (I)   29,30 150
+    VH-VN,VZ,AX#       Australia                          OC    (I)   29,30 150
     VK9#               Cocos (Keeling) Is.                OC    54    29    038
-    9M2,4(8)           West Malaysia                      AS    54    28    299
-    9M6,8(8)           East Malaysia                      OC    54    28    046
+    9M2,4,9W2,4(8)     West Malaysia                      AS    54    28    299
+    9M6,8,9W6,8(8)     East Malaysia                      OC    54    28    046
     YN,H6-7,HT#        Nicaragua                          NA    11    07    086
     UA-UI1-7,RA-RZ     European Russia                    EU    (E)   16    054
     UA-UI8-0,RA-RZ     Asiatic Russia                     AS    (F)   (G)   015
+    VK0#               Heard I.                           AF    68    39    111
+    VK0#               Macquarie I.                       OC    60    30    153
+    CE9/KC4            Antarctica                         AN    (B)   (C)   013
+    HZ,7Z              Saudi Arabia                       AS    39    21    378
+    OU-OZ,5P,5Q        Denmark                            EU    18    14    221
+    HO,HP,3E,3F#       Panama                             NA    11    07    088
+    CA-CE,3G,XQ-XR#    Chile                              SA    14,16 12    112
+    SN-SR,HF,3Z        Poland                             EU    28    15    269
+    EA-EH,AO           Spain                              EU    37    14    281
+    4U1ITU#            ITU HQ                             EU    28    14    117
+    4U1A,4U1UN         United Nations HQ                  NA    08    05    289
 
     NOTES:
     1    Unofficial prefix.

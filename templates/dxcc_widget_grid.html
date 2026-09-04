@@ -1,0 +1,38 @@
+{% extends "base_widget.html" %}
+{% block title %}DXCC: Challenge Grid{% endblock %}
+{% block content %}
+<div class="grid-scroll">
+<table class="challenge-grid">
+  <tr>
+    <th>Country</th>
+    {% for h in challenge.headers %}<th>{{ h }}</th>{% endfor %}
+  </tr>
+  <tr class="totals-row">
+    <td class="country-cell">LoTW &amp; Card</td>
+    {% for n in challenge.band_totals.lotw_and_card %}<td>{{ n }}</td>{% endfor %}
+  </tr>
+  <tr class="totals-row">
+    <td class="country-cell">LoTW Only</td>
+    {% for n in challenge.band_totals.lotw_only %}<td>{{ n }}</td>{% endfor %}
+  </tr>
+  <tr class="totals-row">
+    <td class="country-cell">Any Contact</td>
+    {% for n in challenge.band_totals.any_contact %}<td>{{ n }}</td>{% endfor %}
+  </tr>
+  {% for row in challenge.rows %}
+  <tr>
+    <td class="country-cell">{{ row.country }}</td>
+    {% for cell in row.cells %}
+      <td style="background-color: {{ cell.status.color }};">
+        {% if cell.tooltip %}
+          <span class="tooltip">{{ cell.text }}<span class="tooltiptext">{{ cell.tooltip | safe }}</span></span>
+        {% else %}
+          {{ cell.text }}
+        {% endif %}
+      </td>
+    {% endfor %}
+  </tr>
+  {% endfor %}
+</table>
+</div>
+{% endblock %}

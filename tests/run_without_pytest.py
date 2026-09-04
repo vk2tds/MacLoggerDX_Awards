@@ -30,20 +30,30 @@ def run(name, fn, *args):
         failed += 1
 
 
-def run_simple_module(modname):
+def run_simple_module(modname, skip=()):
     mod = __import__(modname)
     for attr in dir(mod):
-        if attr.startswith("test_"):
+        if attr.startswith("test_") and attr not in skip:
             run(f"{modname}.{attr}", getattr(mod, attr))
 
 
 run_simple_module("test_wsjtx_udp")
 run_simple_module("test_ft8_parser")
 run_simple_module("test_dxcc_lookup")
-run_simple_module("test_qsl_helper")
+# The auto-close-confirmed-methods tests need a real qso_table DB fixture
+# (call/qsl_received columns) -- run separately below, same "hand-roll the
+# fixture" approach as test_log_status.py's block further down.
+run_simple_module("test_qsl_helper", skip={
+    "test_auto_close_confirmed_methods_marks_confirmed_call_done",
+    "test_auto_close_confirmed_methods_leaves_unconfirmed_pending",
+    "test_auto_close_confirmed_methods_never_reopens_a_done_entry",
+})
 run_simple_module("test_live_monitor_reply")
+run_simple_module("test_live_monitor_grid_memory")
+run_simple_module("test_radio_control_watchdog")
 run_simple_module("test_qso_queue")
 run_simple_module("test_macloggerdx_bridge")
+run_simple_module("test_audio_spectrum_atexit")
 
 # -- test_log_status.py, with hand-rolled fixtures --
 import test_log_status as tls  # noqa: E402
@@ -173,6 +183,47 @@ for fn_name in (
         run(f"test_log_writer.{fn_name}", getattr(tlw, fn_name), wdb_path)
     finally:
         os.unlink(wdb_path)
+
+
+# -- test_qsl_helper.py's auto-close-confirmed-methods tests --
+import test_qsl_helper as tqh  # noqa: E402
+
+
+def make_qsl_db():
+    fd, path = tempfile.mkstemp(suffix=".sql")
+    os.close(fd)
+    conn = sqlite3.connect(path)
+    conn.execute(
+        """
+        CREATE TABLE qso_table_v008 (
+            call TEXT, dxcc_country TEXT, dxcc_id INTEGER, cq_zone TEXT,
+            band_rx TEXT, mode TEXT, qsl_sent TEXT, qsl_received TEXT, grid TEXT
+        )
+        """
+    )
+    rows = [
+        ("W1AW", "United States of America", 291, "05", "20M", "FT8", "", "LoTW: 20230101", "FN31pr"),
+        ("K1ABC", "United States of America", 291, "05", "20M", "FT8", "", "", "FN42aa"),
+    ]
+    conn.executemany(
+        "INSERT INTO qso_table_v008 (call, dxcc_country, dxcc_id, cq_zone, band_rx, mode, qsl_sent, qsl_received, grid) VALUES (?,?,?,?,?,?,?,?,?)",
+        rows,
+    )
+    conn.commit()
+    conn.close()
+    return path
+
+
+for fn_name in (
+    "test_auto_close_confirmed_methods_marks_confirmed_call_done",
+    "test_auto_close_confirmed_methods_leaves_unconfirmed_pending",
+    "test_auto_close_confirmed_methods_never_reopens_a_done_entry",
+):
+    qdb_path = make_qsl_db()
+    try:
+        run(f"test_qsl_helper.{fn_name}", getattr(tqh, fn_name), "qso_table_v008", qdb_path)
+    finally:
+        os.unlink(qdb_path)
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

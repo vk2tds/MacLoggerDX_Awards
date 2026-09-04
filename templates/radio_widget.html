@@ -1,0 +1,7 @@
+{% extends "base_widget.html" %}
+{% block title %}Radio: {{ {'control': 'Control', 'proc': 'rigctld', 'freq': 'Frequency'}[widget_mode] }}{% endblock %}
+{% block body_attrs %} data-widget-mode="{{ widget_mode }}"{% endblock %}
+{% block content %}
+{% include "_radio_control_body.html" %}
+<script src="{{ url_for('static', filename='radio_control.js') }}"></script>
+{% endblock %}

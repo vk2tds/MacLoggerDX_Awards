@@ -39,12 +39,42 @@ don't match any outstanding DXCC/band cell (check for a typo in the country or b
 </table>
 {% endif %}
 
+{% if unknown_dxcc %}
+<h2>Unknown DXCC callsigns</h2>
+<p>These decoded callsigns didn't resolve to any DXCC entity (bad/garbled decode, or a genuinely missing
+prefix in <code>dxcc.txt</code> worth checking).</p>
+<table class="stale-table">
+  <tr><th>Call</th><th>First seen</th><th>Last seen</th><th>Count</th><th>Band</th><th>Mode</th><th>Message</th><th></th></tr>
+  {% for e in unknown_dxcc %}
+  <tr>
+    <td>{{ e.call }}</td><td>{{ e.first_seen }}</td><td>{{ e.last_seen }}</td>
+    <td>{{ e.count }}</td><td>{{ e.band or '' }}</td><td>{{ e.mode or '' }}</td><td>{{ e.message or '' }}</td>
+    <td><form method="post" action="{{ url_for('dxcc_unknown_clear', call=e.call) }}" style="display:inline;">
+      <button type="submit">Clear</button>
+    </form></td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
 <h2>Challenge Grid</h2>
 <div class="grid-scroll">
 <table class="challenge-grid">
   <tr>
     <th>Country</th>
     {% for h in challenge.headers %}<th>{{ h }}</th>{% endfor %}
+  </tr>
+  <tr class="totals-row">
+    <td class="country-cell">LoTW &amp; Card</td>
+    {% for n in challenge.band_totals.lotw_and_card %}<td>{{ n }}</td>{% endfor %}
+  </tr>
+  <tr class="totals-row">
+    <td class="country-cell">LoTW Only</td>
+    {% for n in challenge.band_totals.lotw_only %}<td>{{ n }}</td>{% endfor %}
+  </tr>
+  <tr class="totals-row">
+    <td class="country-cell">Any Contact</td>
+    {% for n in challenge.band_totals.any_contact %}<td>{{ n }}</td>{% endfor %}
   </tr>
   {% for row in challenge.rows %}
   <tr>

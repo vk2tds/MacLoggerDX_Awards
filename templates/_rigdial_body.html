@@ -1,0 +1,81 @@
+<style>
+  .rd-shell { background: #ececec; border: 1px solid #b8b8b8; border-radius: 8px; padding: 0.75rem; font-family: -apple-system, "Segoe UI", sans-serif; color: #111; max-width: 50em; margin-bottom: 1rem; }
+  .rd-conn { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; margin-bottom: 0.4rem; }
+  .rd-conn .dot { width: 0.8rem; height: 0.8rem; border-radius: 50%; background: #999; flex-shrink: 0; }
+  .rd-conn .dot.up { background: #2e9c4a; }
+  .rd-conn .dot.down { background: #c62828; }
+  .rd-event { font-size: 0.78rem; color: #555; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  .rd-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+  .rd-row label { display: flex; align-items: center; gap: 0.3rem; font-size: 0.85rem; }
+  .rd-row select { font-size: 0.85rem; padding: 0.2rem 0.3rem; }
+  .rd-row input[type=number] { width: 6em; font-size: 0.85rem; padding: 0.2rem 0.3rem; }
+  .rd-row button { cursor: pointer; border: 1px solid #999; background: #f4f4f4; border-radius: 3px; padding: 0.3rem 0.7rem; font-size: 0.85rem; }
+  .rd-row button:hover { background: #e6e6e6; }
+
+  .action-result { font-size: 0.78rem; margin-left: 0.5rem; }
+  .action-result.ok { color: #2e7d32; }
+  .action-result.err { color: #c62828; }
+
+  /* Dashboard-widget context: dash-tile-header/dash-tile-body already
+     frames this tile -- drop .rd-shell's own card styling so a widget
+     doesn't show a box inside a box. See the near-identical note in
+     _radio_control_body.html. RigDial has no widget_mode filtering (single
+     catalog entry) but templates/rigdial_widget.html still sets
+     data-widget-mode="" purely so this selector can tell "widget" from
+     "full page" apart. color:inherit is needed too, not just cosmetic --
+     .rd-shell's own #111 was only ever readable against its own
+     background; once that's gone the tile's actual (light- or dark-mode)
+     background shows through instead, and dark mode with near-black text
+     left on it is unreadable (confirmed live). */
+  body[data-widget-mode] .rd-shell,
+  :host([data-widget-mode]) .rd-shell { background: none; border: none; border-radius: 0; padding: 0.5rem 0.65rem; max-width: none; color: inherit; }
+  /* ...except form controls: .rd-row's buttons keep their own light
+     background regardless of page theme, so color:inherit would leave
+     light dark-mode text on that light background (confirmed live on the
+     near-identical Radio Control case). Inputs/selects need an explicit
+     background too, not just color -- they have none of their own, so
+     they were picking up the browser's native dark-mode form styling
+     instead, which is just as unreadable against forced-dark text. */
+  body[data-widget-mode] .rd-shell button,
+  :host([data-widget-mode]) .rd-shell button { color: #111; }
+  body[data-widget-mode] .rd-shell input, body[data-widget-mode] .rd-shell select,
+  :host([data-widget-mode]) .rd-shell input, :host([data-widget-mode]) .rd-shell select { color: #111; background: #fff; }
+</style>
+
+<div class="rd-shell">
+  <div class="rd-conn">
+    <span class="dot" id="rd-dot"></span>
+    <span id="rd-conn-text">checking…</span>
+  </div>
+  <div class="rd-event" id="rd-event">--</div>
+</div>
+
+<div class="rd-shell">
+  <h3 style="margin: 0 0 0.5rem;">Button / jog / shuttle mapping</h3>
+  <div id="rd-button-rows"></div>
+  <div class="rd-row">
+    <label>Shuttle ring
+      <select id="rd-shuttle-action">
+        {% for action in shuttle_actions %}<option value="{{ action }}">{{ action }}</option>{% endfor %}
+      </select>
+    </label>
+  </div>
+  <div class="rd-row">
+    <label>Jog step, small (Hz) <input type="number" id="rd-step-small" min="1" step="1"></label>
+    <label>Jog step, big (Hz) <input type="number" id="rd-step-big" min="1" step="1"></label>
+  </div>
+  <div class="rd-row">
+    <button id="rd-save-config-btn">Save mapping</button>
+    <span class="action-result" id="rd-config-result"></span>
+  </div>
+  <p style="font-size:0.75rem; color:#888; max-width:44em;">
+    <code>mod_*</code> actions only take effect while that button is held down: the jog wheel adjusts
+    that parameter instead of VFO frequency for as long as it's held. <code>band_up</code>/
+    <code>band_down</code>/shuttle's <code>cycle_presets</code> step through whichever presets have
+    their "RigDial" box checked on the <a href="{{ url_for('frequencies.frequencies_view') }}">Frequencies</a>
+    tab, in order. <code>ptt</code> keys the transmitter directly while held -- same caution as the
+    Radio tab's Key Tx button.
+  </p>
+</div>
+

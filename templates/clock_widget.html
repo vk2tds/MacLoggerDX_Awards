@@ -1,0 +1,14 @@
+{% extends "base_widget.html" %}
+{% block title %}UTC Clock{% endblock %}
+{% block content %}
+<style>
+  .clock-widget { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-align: center; }
+  .clock-time { font-size: 2.6rem; font-weight: 700; letter-spacing: 0.02em; white-space: nowrap; }
+  .clock-date { font-size: 1.1rem; color: var(--muted, #888); margin-top: 0.4rem; letter-spacing: 0.02em; white-space: nowrap; }
+</style>
+<div class="clock-widget">
+  <div class="clock-time" id="clock-time">--:--:--</div>
+  <div class="clock-date" id="clock-date">----</div>
+</div>
+<script src="{{ url_for('static', filename='applets/clock.js') }}"></script>
+{% endblock %}

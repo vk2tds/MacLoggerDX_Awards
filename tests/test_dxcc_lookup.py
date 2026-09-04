@@ -22,6 +22,22 @@ def test_expand_continuation_shorthand():
     assert _expand_prefix_field("9M2,4(8)") == [("literal", "9M2"), ("literal", "9M4")]
 
 
+def test_expand_two_unrelated_literals_not_mistaken_for_shorthand():
+    # Regression (live 2026-08-30): the continuation-shorthand rule above
+    # (a shorter token after a longer one replaces the longer one's
+    # trailing characters, e.g. "9M2,4" -> "9M2","9M4") mis-fired on two
+    # genuinely unrelated literals that just happen to have one shorter
+    # than the other -- "4U1UN,4U1A" silently expanded to
+    # "4U1UN","44U1A" (4U1UN's last 4 chars replaced by "4U1A") instead of
+    # two independent literals, so "4U1A" (the UN's Vienna office) never
+    # resolved at all. Putting the shorter one first avoids the shorthand
+    # path entirely (its own length check requires the *later* token to be
+    # shorter, not the earlier one) -- confirm both orderings behave as
+    # expected so this can't quietly regress the other way either.
+    assert _expand_prefix_field("4U1A,4U1UN") == [("literal", "4U1A"), ("literal", "4U1UN")]
+    assert _expand_prefix_field("4U1UN,4U1A") == [("literal", "4U1UN"), ("literal", "44U1A")]
+
+
 def test_expand_dash_continuation_shorthand():
     # Nicaragua: "H6-7" means H6..H7, not a literal "H6" plus a bogus
     # single-digit literal "7" (which would then wrongly match any call
@@ -40,7 +56,7 @@ def test_expand_digit_prefixed_range():
 
 def test_resolver_loads_fixture():
     r = DxccResolver(FIXTURE)
-    assert len(r.entities) == 13
+    assert len(r.entities) == 24
 
 
 def test_lookup_japan_digit_prefixed_range_not_nicaragua():
@@ -155,3 +171,95 @@ def test_lookup_uk_modern_m_and_2e_prefixes():
     assert r.lookup("M0UOO").name == "United Kingdom of Great Britain"
     assert r.lookup("2E0ABC").name == "United Kingdom of Great Britain"
     assert r.lookup("G0ABC").name == "United Kingdom of Great Britain"
+
+
+def test_lookup_vk0_antarctica_by_grid():
+    # Regression (live 2026-08-16): VK0DS decoded with grid MC81 (~68.5S
+    # 78E, right at Davis Station) was resolving to "Heard I." -- an
+    # arbitrary tie-break, since Heard I. and Macquarie I. both list the
+    # identical "VK0#" prefix and Antarctica's own footnote separately
+    # documents VK0 as one of many home-country prefixes used by Antarctic
+    # stations. South of 60S (ARRL's own Antarctica boundary) should always
+    # win regardless of longitude.
+    r = DxccResolver(FIXTURE)
+    assert r.lookup("VK0DS", grid="MC81").name == "Antarctica"
+    assert r.lookup("VK0MAW", grid="MC12").name == "Antarctica"  # Mawson Station
+
+
+def test_lookup_vk0_heard_vs_macquarie_by_grid():
+    r = DxccResolver(FIXTURE)
+    assert r.lookup("VK0EK", grid="MD66").name == "Heard I."       # ~53S 73E
+    assert r.lookup("VK0MC", grid="QD95").name == "Macquarie I."   # ~54.5S 159E
+
+
+def test_lookup_vk0_without_grid_keeps_default():
+    # No grid to disambiguate with -- can't do better than the pre-existing
+    # arbitrary default, but must still resolve to *something* rather than
+    # regressing to no match at all.
+    r = DxccResolver(FIXTURE)
+    assert r.lookup("VK0XX").name == "Heard I."
+
+
+def test_lookup_russia_full_ua_ui_range_not_just_endpoints():
+    # Regression (live 2026-08-30): dxcc.txt's real entry is "UA-UI1-7" --
+    # the *range* UA through UI -- but the special-case regex only ever
+    # matched the literal strings "UA" and "UI", silently dropping every
+    # call using UB/UC/UD/UE/UF/UG/UH. Surfaced via a large, sustained
+    # cluster of U[B-F]-prefixed calls in the "Unknown DXCC callsigns" log
+    # (dozens of genuinely different Russian stations, not noise).
+    r = DxccResolver(FIXTURE)
+    for call, expected in (
+        ("UB0IBA", "Asiatic Russia"),   # area 0 -> Asiatic
+        ("UC6D", "European Russia"),    # area 6 -> European
+        ("UD6X", "European Russia"),
+        ("UE3ABC", "European Russia"),
+        ("UF1A", "European Russia"),
+        ("UG3ABC", "European Russia"),
+        ("UH8ABC", "Asiatic Russia"),   # area 8 -> Asiatic
+    ):
+        ent = r.lookup(call)
+        assert ent is not None and ent.name == expected, f"{call} -> {ent}"
+    # Must NOT bleed past the range into Uzbekistan's adjacent UJ-UM block
+    # -- this fixture doesn't carry Uzbekistan, so a real mismatch here
+    # would show up as an unexpected resolve, not just a wrong one.
+    assert r.lookup("UJ8ABC") is None
+
+
+def test_lookup_special_event_and_secondary_prefixes():
+    # Regression (live 2026-08-30): several mainstream countries' second
+    # prefix blocks -- widely used for special-event/contest stations, not
+    # exotic edge cases -- were missing from dxcc.txt entirely, discovered
+    # the same way as the Russia gap above (a real decode showing up in
+    # the unknown-DXCC log, then confirmed against the country's actual
+    # ITU allocation before fixing, same as every other prefix fix this
+    # session).
+    r = DxccResolver(FIXTURE)
+    checks = {
+        "9W2BAF": "West Malaysia", "9W6ABC": "East Malaysia",  # modern MY prefix, not just 9M
+        "TM6KJS": "France",                                     # French special-event stations
+        "8J1HAM": "Japan", "8N3AZ": "Japan",                    # Japanese special-event stations
+        "VJ2Q": "Australia", "VL4A": "Australia",               # AU special-event (VH-VN range)
+        "7Z1CZ": "Saudi Arabia",
+        "5P5Z": "Denmark", "5Q1ABC": "Denmark",
+        "3E40CDW": "Panama", "3F1ABC": "Panama",
+        "3G1DX": "Chile", "XQ1CY": "Chile", "XR3ABC": "Chile",
+        "HF8E": "Poland", "3Z0YL": "Poland",
+        "AO5FSB": "Spain",
+    }
+    for call, expected in checks.items():
+        ent = r.lookup(call)
+        assert ent is not None and ent.name == expected, f"{call} -> {ent}"
+
+
+def test_lookup_un_hq_vienna_and_new_york_both_resolve():
+    # Regression (live 2026-08-30): dxcc.txt's ITU HQ/UN HQ entries used
+    # literal "4U_ITU"/"4U_UN" placeholders (an underscore isn't a valid
+    # callsign character) that could never match any real callsign at all.
+    # Fixed to real literals, and 4U1A (the UN's Vienna office, per the
+    # user) added alongside 4U1UN under the same "United Nations HQ"
+    # entity -- see test_expand_two_unrelated_literals_not_mistaken_for_shorthand
+    # for the token-order gotcha hit getting this in correctly.
+    r = DxccResolver(FIXTURE)
+    assert r.lookup("4U1ITU").name == "ITU HQ"
+    assert r.lookup("4U1UN").name == "United Nations HQ"
+    assert r.lookup("4U1A").name == "United Nations HQ"

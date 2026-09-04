@@ -5,10 +5,11 @@
 // redrawing full history every frame (what waterfall.js does, fine for its
 // handful of sparse rows, but not for a dense continuous spectrogram that
 // can be updating 4x/sec) -- each new row is drawn once, cheaply.
-function createSpectrumWaterfall(canvas) {
+function createSpectrumWaterfall(canvas, opts) {
   const ctx = canvas.getContext('2d');
   const ROW_H = 1;
   let numBins = 0;
+  const onSecondsChanged = (opts && opts.onSecondsChanged) || null;
 
   // Duration shown is configured in seconds rather than rows, since the two
   // spectrum modes push rows at different rates (4/sec vs ~1/sec) -- the
@@ -68,6 +69,7 @@ function createSpectrumWaterfall(canvas) {
   function applyHeight() {
     canvas.height = Math.max(2, Math.round(seconds * rate)); // resizing a canvas clears it -- accepted, simplest
     clear();
+    if (onSecondsChanged) onSecondsChanged(seconds);
   }
 
   function setRate(rowsPerSec) {
@@ -81,6 +83,28 @@ function createSpectrumWaterfall(canvas) {
     return seconds;
   }
 
+  // -- Auto-fit (opts.autoFit): same idea and same polling-not-observing
+  // approach as waterfall.js's near-identical block -- recompute how many
+  // seconds of history the canvas's actual rendered CSS height can hold,
+  // instead of staying frozen at whatever seconds*rate produced at mount
+  // time. See waterfall.js's comment for why this polls on an interval
+  // rather than using ResizeObserver (confirmed live: an observer attached
+  // around a Dashboard tile's initial GridStack insertion stops receiving
+  // callbacks for later drag-resizes of that same tile).
+  let autoFitTimer = null;
+  if (opts && opts.autoFit) {
+    let lastH = -1;
+    autoFitTimer = setInterval(() => {
+      const h = Math.round(canvas.getBoundingClientRect().height);
+      if (h < 1 || h === lastH) return;
+      lastH = h;
+      setSeconds(h / rate);
+    }, 400);
+  }
+
   clear();
-  return { pushRow, clear, setRate, setSeconds, get seconds() { return seconds; } };
+  return {
+    pushRow, clear, setRate, setSeconds, get seconds() { return seconds; },
+    stopAutoFit() { if (autoFitTimer) clearInterval(autoFitTimer); },
+  };
 }

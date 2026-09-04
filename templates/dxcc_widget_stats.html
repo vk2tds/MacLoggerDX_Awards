@@ -1,0 +1,25 @@
+{% extends "base_widget.html" %}
+{% block title %}DXCC: Status Box{% endblock %}
+{% block body_attrs %} data-widget-mode=""{% endblock %}
+{% block content %}
+<style>
+  /* .stats-table itself (static/style.css) is nearly bare -- fine sitting
+     in the full DXCC page's normal flow, but cramped/unstyled-looking as
+     the sole content of a small Dashboard tile. This widget-only styling
+     doesn't touch the shared class, just adds to it here. */
+  .dxcc-stats-wrap { height: 100%; display: flex; align-items: center; }
+  .dxcc-stats-table { width: 100%; }
+  .dxcc-stats-table td { padding: 0.5rem 0.3rem; border-bottom: 1px solid var(--border, #eee); font-size: 0.9rem; }
+  .dxcc-stats-table tr:last-child td { border-bottom: none; }
+  .dxcc-stats-table td:first-child { color: var(--muted, #666); }
+  .dxcc-stats-table td:last-child { text-align: right; font-weight: 700; font-size: 1.2rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+</style>
+<div class="dxcc-stats-wrap">
+<table class="stats-table dxcc-stats-table">
+  <tr><td>DXCC Count Confirmed</td><td>{{ challenge.stats.dxcc_confirmed }}</td></tr>
+  <tr><td>DXCC Count With Unconfirmed</td><td>{{ challenge.stats.dxcc_with_unconfirmed }}</td></tr>
+  <tr><td>DXCC Challenge Count Confirmed</td><td>{{ challenge.stats.challenge_confirmed }}</td></tr>
+  <tr><td>DXCC Challenge Count With Unconfirmed</td><td>{{ challenge.stats.challenge_with_unconfirmed }}</td></tr>
+</table>
+</div>
+{% endblock %}

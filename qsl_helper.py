@@ -428,6 +428,33 @@ def _is_confirmed(qsl_received) -> bool:
     return any(tag in qsl_received for tag in ("LoTW", "eQSL", "CardC", "Card"))
 
 
+def _call_has_confirmed_qso(database_path: str, qso_table: str, call: str) -> bool:
+    conn = _connect_ro(database_path)
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT qsl_received FROM {qso_table} WHERE call = ?", (call,))
+        return any(_is_confirmed(row[0]) for row in cur.fetchall())
+    finally:
+        conn.close()
+
+
+def _auto_close_confirmed_methods(database_path: str, qso_table: str, methods: "QslMethods") -> list:
+    """A QSL To-Do entry tracks "how do I get a card/LoTW from this call" --
+    once the logbook actually shows a confirmation for them, the to-do is
+    done whether or not anyone remembered to click "Mark Done". Checked on
+    every /qsl/data load (not just when a QSO changes) since a confirmation
+    can land via LoTW/eQSL sync outside this app's own write path. Never
+    auto-*reopens* a done entry -- only auto-closing is asked for here, and
+    reopening stays a deliberate manual action via the existing button."""
+    entries = methods.load()
+    for e in entries:
+        if e.get("status") == "done":
+            continue
+        if _call_has_confirmed_qso(database_path, qso_table, e["call"]):
+            entries = methods.set_status(e["call"], "done")
+    return entries
+
+
 def find_at_risk_qsos(database_path: str, qso_table: str, dxcc_resolver: Optional[DxccResolver] = None) -> list:
     """(DXCC entity, band) combinations with zero LoTW/eQSL/card confirmation
     -- e.g. Northern Ireland worked and confirmed on 20M but not on 12M/10M
@@ -650,6 +677,16 @@ def qsl_view():
     return render_template("qsl_helper.html", my_calls=", ".join(_config.my_calls) if _config else "")
 
 
+@qsl_bp.route("/qsl/widget")
+def qsl_widget():
+    """Dashboard widget: the whole QSL Helper screen, unsplit -- see
+    templates/qsl_helper_widget.html and dashboard.py's module docstring
+    for the overall widget pattern. Unlike the multi-section pages, this one
+    has no sub-widgets to switch between (see the user's original widget
+    list), so there's no data-widget-mode/CSS-hiding here."""
+    return render_template("qsl_helper_widget.html")
+
+
 @qsl_bp.route("/qsl/data")
 def qsl_data():
     if _config is None or _cache is None:
@@ -688,7 +725,7 @@ def qsl_data():
     return jsonify({
         "entities": entities,
         "cache_status": _cache.status,
-        "methods": _methods.load(),
+        "methods": _auto_close_confirmed_methods(_config.database_path, _config.qso_table, _methods),
         "not_in_log": _not_in_log.load(),
         "lotw_status": {"count": _lotw.count, "updated": _lotw.updated},
     })

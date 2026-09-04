@@ -26,6 +26,7 @@ from flask_sock import Sock
 import macloggerdx_awards
 import awards_tree
 import audio_spectrum
+import dashboard
 import dxcc_challenge
 import frequencies
 import live_monitor
@@ -33,6 +34,7 @@ import logbook
 import qsl_helper
 import radio_control
 import rigdial
+import unknown_dxcc_log
 import wsjtx_remote
 
 log = logging.getLogger("app." + __name__)
@@ -96,6 +98,7 @@ rigdial.init_rigdial(app)
 frequencies.init_frequencies(app)
 
 logbook.init_logbook(app, analysis.database_name, analysis.qso_table)
+dashboard.init_dashboard(app)
 
 
 @app.route('/')
@@ -116,12 +119,70 @@ def dxcc_view():
     if state['error']:
         return render_template('error.html', error=state['error'])
     challenge = dxcc_challenge.build_challenge(analysis.rawtable)
-    return render_template('dxcc.html', challenge=challenge, last_refreshed=state['last_refreshed'])
+    return render_template(
+        'dxcc.html', challenge=challenge, last_refreshed=state['last_refreshed'],
+        unknown_dxcc=unknown_dxcc_log.list_entries(),
+    )
+
+
+@app.route('/dxcc/unknown/<call>/clear', methods=['POST'])
+def dxcc_unknown_clear(call):
+    unknown_dxcc_log.clear_entry(call)
+    return redirect(url_for('dxcc_view'))
+
+
+# Dashboard widgets -- same challenge = dxcc_challenge.build_challenge(...)
+# the full /dxcc page above uses, just rendering one section of it at a time
+# into templates/base_widget.html's minimal shell instead of dxcc.html's
+# full page. See dashboard.py's module docstring for the overall pattern.
+@app.route('/dxcc/widget/stats')
+def dxcc_widget_stats():
+    if state['error']:
+        return render_template('error.html', error=state['error'])
+    challenge = dxcc_challenge.build_challenge(analysis.rawtable)
+    return render_template('dxcc_widget_stats.html', challenge=challenge)
+
+
+@app.route('/dxcc/widget/legend')
+def dxcc_widget_legend():
+    if state['error']:
+        return render_template('error.html', error=state['error'])
+    challenge = dxcc_challenge.build_challenge(analysis.rawtable)
+    return render_template('dxcc_widget_legend.html', challenge=challenge)
+
+
+@app.route('/dxcc/widget/grid')
+def dxcc_widget_grid():
+    if state['error']:
+        return render_template('error.html', error=state['error'])
+    challenge = dxcc_challenge.build_challenge(analysis.rawtable)
+    return render_template('dxcc_widget_grid.html', challenge=challenge)
 
 
 @app.route('/help')
 def help_view():
     return render_template('help.html')
+
+
+@app.route('/help/widget')
+def help_widget():
+    """Dashboard widget: the whole Help screen, unsplit -- see
+    templates/help_widget.html and dashboard.py's module docstring for the
+    overall widget pattern. Static content, no JS at all."""
+    return render_template('help_widget.html')
+
+
+@app.route('/clock/widget')
+def clock_widget():
+    """Dashboard widget: a big UTC time + date readout -- purely a
+    Dashboard convenience with no corresponding full page of its own (there
+    isn't a "Clock" tab), so unlike every other widget this one has no
+    iframe-compatible predecessor to preserve; it was built as a JS applet
+    from the start (see static/applets/clock.js). Still follows the same
+    fetch-a-small-page-and-mount pattern as everything else for consistency
+    -- the actual ticking is 100% client-side, nothing here depends on
+    server state."""
+    return render_template('clock_widget.html')
 
 
 @app.route('/refresh', methods=['POST'])

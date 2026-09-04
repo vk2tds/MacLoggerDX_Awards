@@ -1,0 +1,100 @@
+<style>
+  .cache-bar { display: flex; gap: 1rem; align-items: center; font-size: 0.85rem; color: #666; margin-bottom: 1rem; flex-wrap: wrap; }
+  .cache-bar button { cursor: pointer; border: 1px solid var(--border, #ccc); background: var(--bg, #fff); border-radius: 4px; padding: 0.25rem 0.7rem; }
+  .cache-dot { display: inline-block; width: 0.55rem; height: 0.55rem; border-radius: 50%; background: #999; margin-right: 0.3rem; }
+  .cache-dot.ready { background: #2e7d32; }
+  .cache-dot.indexing, .cache-dot.updating { background: #e67e22; }
+  .cache-dot.error { background: #c62828; }
+
+  .entity-block { margin-bottom: 1.5rem; }
+  .entity-block h2 { font-size: 1rem; margin: 0 0 0.4rem; }
+  .qsl-table-scroll { overflow-x: auto; }
+  table.qsl-table { border-collapse: collapse; width: 100%; font-size: 0.85rem; min-width: 760px; }
+  table.qsl-table th, table.qsl-table td { border-bottom: 1px solid #eee; padding: 0.3rem 0.5rem; text-align: left; vertical-align: top; }
+  table.qsl-table th { font-weight: 600; }
+  /* SNR is numeric -- right-justify like every other SNR column in the app
+     (Live Monitor, WSJT-X Remote, DX Monitor). */
+  table.qsl-table .col-snr { text-align: right; }
+
+  .badge { display: inline-block; border-radius: 3px; padding: 0.1rem 0.5rem; font-size: 0.78rem; font-weight: 600; color: #fff; }
+  .badge-high { background: #2e7d32; }
+  .badge-medium { background: #e67e22; }
+  .badge-low { background: #c62828; }
+  .badge-unknown { background: #888; }
+
+  .exchange-toggle { cursor: pointer; color: #1565c0; font-size: 0.8rem; background: none; border: none; padding: 0; }
+  .exchange-panel { display: none; background: #fafafa; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; padding: 0.5rem; }
+  .exchange-panel.open { display: block; }
+  .exchange-panel div.tx { color: #1565c0; }
+  .exchange-panel div.rx { color: #333; }
+
+  .method-form { display: flex; gap: 0.35rem; align-items: center; flex-wrap: wrap; }
+  .method-form select, .method-form input { font-size: 0.8rem; padding: 0.15rem 0.3rem; }
+  .method-form input[type=text] { width: 8em; }
+  .method-form button { cursor: pointer; font-size: 0.78rem; }
+  .method-saved { color: #2e7d32; font-size: 0.75rem; margin-left: 0.3rem; }
+
+  .todo-box { border: 1px solid var(--border, #ddd); border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 1.25rem; overflow-x: auto; }
+  table.todo-table { min-width: 560px; }
+  .todo-box h2 { font-size: 0.95rem; margin: 0 0 0.5rem; }
+  table.todo-table { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
+  table.todo-table th, table.todo-table td { border-bottom: 1px solid #eee; padding: 0.3rem 0.5rem; text-align: left; }
+  .todo-method { display: inline-block; border-radius: 3px; padding: 0.1rem 0.5rem; font-size: 0.75rem; font-weight: 600; background: #17a2b8; color: #fff; }
+  .todo-empty { color: #888; font-size: 0.85rem; }
+  .todo-show-done { font-size: 0.78rem; color: #888; margin-top: 0.5rem; }
+  .todo-done-row { opacity: 0.55; }
+
+  .call-cell { display: flex; align-items: center; gap: 0.4rem; }
+  .qrz-link { color: #888; text-decoration: none; font-size: 0.8rem; border: 1px solid var(--border, #ccc); border-radius: 3px; padding: 0 0.3rem; }
+  .qrz-link:hover { color: #1565c0; border-color: #1565c0; }
+  .not-in-log-btn { cursor: pointer; font-size: 0.75rem; color: #888; background: none; border: 1px solid var(--border, #ccc); border-radius: 3px; padding: 0.05rem 0.4rem; }
+  .not-in-log-btn:hover { color: #c62828; border-color: #c62828; }
+  .not-in-log-btn.nil-marked { color: #c62828; border-color: #c62828; background: #fdecea; }
+  .not-in-log-btn:disabled { opacity: 0.6; cursor: default; }
+
+  .not-in-log-box { border: 1px solid var(--border, #ddd); border-radius: 6px; padding: 0.6rem 1rem; margin-top: 1.5rem; }
+  .not-in-log-box h2 { font-size: 0.9rem; margin: 0 0 0.4rem; color: #888; }
+  .not-in-log-row { display: flex; align-items: center; gap: 0.6rem; font-size: 0.8rem; padding: 0.15rem 0; border-bottom: 1px solid #f0f0f0; flex-wrap: wrap; }
+  .not-in-log-row:last-child { border-bottom: none; }
+  .not-in-log-row .nil-call { font-weight: 600; min-width: 6em; }
+  .not-in-log-row .nil-meta { color: #888; flex: 1; }
+  .not-in-log-row button { cursor: pointer; font-size: 0.75rem; }
+  .not-in-log-empty { color: #888; font-size: 0.8rem; }
+
+  /* Dashboard-widget context: dash-tile-header/dash-tile-body already
+     frames this tile -- drop the To-Do/Not-in-log panels' own borders so a
+     widget doesn't show boxes inside a box. See the near-identical note in
+     _radio_control_body.html. templates/qsl_helper_widget.html sets
+     data-widget-mode="" purely so this selector can tell "widget" from
+     "full page" apart (QSL Helper has no widget_mode filtering). */
+  body[data-widget-mode] .todo-box,
+  body[data-widget-mode] .not-in-log-box,
+  :host([data-widget-mode]) .todo-box,
+  :host([data-widget-mode]) .not-in-log-box { border: none; border-radius: 0; padding: 0.5rem 0; }
+</style>
+
+<div class="todo-box">
+  <h2>QSL To-Do</h2>
+  <div id="todo-content"></div>
+  <label class="todo-show-done"><input type="checkbox" id="todo-show-done"> Show completed</label>
+</div>
+
+<div class="cache-bar">
+  <span><span id="cache-dot" class="cache-dot"></span><span id="cache-text">checking ALL.TXT index...</span></span>
+  <button id="reindex-btn">Re-scan ALL.TXT now</button>
+  <span>|</span>
+  <span id="lotw-text">LoTW activity: --</span>
+  <button id="lotw-update-btn">Update LoTW activity now</button>
+</div>
+
+<div id="content">Loading...</div>
+
+<div class="not-in-log-box">
+  <h2>Not in their log</h2>
+  <div id="not-in-log-content"></div>
+</div>
+
+<p style="color:#888; font-size:0.78rem; margin-top:1.5rem;">
+  Local VK2-to-VK2 2M contacts are hidden here -- they're same-DXCC-entity VHF QSOs and don't advance any
+  entity chase, so they'd just be noise in this list.
+</p>

@@ -6,4 +6,7 @@ radio_process_state.json
 rigctld.log
 qso_queue.json
 find_scan_config.json
+dashboard_layouts.json
+unknown_dxcc_log.json
+.DS_Store
 

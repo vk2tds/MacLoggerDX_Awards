@@ -1,0 +1,234 @@
+<style>
+  .live-toolbar { display: flex; gap: 1.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.5rem; font-size: 0.9rem; }
+  .live-toolbar label { display: flex; align-items: center; gap: 0.35rem; }
+  #conn-dot { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 50%; background: #999; }
+  #conn-dot.up { background: #2e7d32; }
+  #conn-dot.down { background: #c62828; }
+
+  .scope-bar { display: flex; gap: 1.25rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.5rem; font-size: 0.85rem; color: var(--muted, #666); }
+  .scope-bar label { display: flex; align-items: center; gap: 0.3rem; }
+  .legend { display: flex; gap: 1rem; align-items: center; }
+  .legend .swatch { display: inline-block; width: 0.7rem; height: 0.7rem; border-radius: 2px; margin-right: 0.25rem; vertical-align: middle; }
+  .legend .sw-confirmed { background: #2e7d32; }
+  .legend .sw-worked { background: #e67e22; }
+  .legend .sw-none { background: #c62828; }
+
+  #live-status { font-size: 0.85rem; color: #555; margin-bottom: 0.75rem; padding: 0.15rem 0.4rem; border-radius: 3px; }
+  #live-status.transmitting { background: #f4c20d; color: #000; font-weight: 600; }
+
+  .live-panels { display: flex; gap: 1.25rem; flex-wrap: wrap; align-items: flex-start; }
+  .live-panel { flex: 1 1 480px; min-width: 320px; max-width: 100%; }
+  .live-panel h2 { font-size: 0.95rem; margin: 0 0 0.35rem; }
+  .live-panel-scroll { overflow-x: auto; max-height: 70vh; overflow-y: auto; border: 1px solid var(--border, #ddd); }
+
+  /* Dashboard-widget context: the full page's max-height:70vh is sized
+     against the viewport, which has nothing to do with how tall a resized
+     tile actually is -- inside a short tile that left both dash-tile-body
+     (see dashboard.html) AND this panel independently scrolling at once.
+     Make the panel a flex column filling exactly the tile's own height
+     instead, so there's a single scrollbar that tracks a GridStack resize
+     live. Scoped to the modes that actually show a panel (not "selection",
+     which has none) -- harmless on "selection" regardless since flex
+     children of .live-panels are all display:none there. */
+  [data-widget-mode="cq"] .live-panels, [data-widget-mode="noncq"] .live-panels, [data-widget-mode="merged"] .live-panels,
+  :host([data-widget-mode="cq"]) .live-panels, :host([data-widget-mode="noncq"]) .live-panels, :host([data-widget-mode="merged"]) .live-panels { height: 100%; }
+  [data-widget-mode="cq"] .live-panel, [data-widget-mode="noncq"] .live-panel, [data-widget-mode="merged"] .live-panel,
+  :host([data-widget-mode="cq"]) .live-panel, :host([data-widget-mode="noncq"]) .live-panel, :host([data-widget-mode="merged"]) .live-panel { display: flex; flex-direction: column; height: 100%; }
+  [data-widget-mode="cq"] .live-panel-scroll, [data-widget-mode="noncq"] .live-panel-scroll, [data-widget-mode="merged"] .live-panel-scroll,
+  :host([data-widget-mode="cq"]) .live-panel-scroll, :host([data-widget-mode="noncq"]) .live-panel-scroll, :host([data-widget-mode="merged"]) .live-panel-scroll { max-height: none; flex: 1; min-height: 0; }
+  /* .live-panel's other child (the h2 heading) is a flex item too now --
+     pin it to its natural size so only .live-panel-scroll gives up space
+     under pressure. See the near-identical fix/note in _logbook_body.html. */
+  [data-widget-mode="cq"] .live-panel h2, [data-widget-mode="noncq"] .live-panel h2, [data-widget-mode="merged"] .live-panel h2,
+  :host([data-widget-mode="cq"]) .live-panel h2, :host([data-widget-mode="noncq"]) .live-panel h2, :host([data-widget-mode="merged"]) .live-panel h2 { flex: none; }
+
+  /* table-layout:fixed so column widths are governed by the <colgroup>
+     static/live_monitor.js builds at mount time (see setupResizableTable())
+     instead of by content -- required both for the drag-to-resize handles
+     to mean anything and for auto-fit to actually hold: with the default
+     table-layout, a single long DXCC/Message value blows the whole column
+     (and therefore the table) out wide regardless of what width is set. */
+  table.live-table { border-collapse: collapse; width: 100%; table-layout: fixed; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; }
+  table.live-table th, table.live-table td { padding: 0.2rem 0.45rem; border-bottom: 1px solid #eee; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* position:sticky also establishes a containing block for the
+     absolutely-positioned .col-resize-handle each <th> gets at mount time
+     -- no separate position:relative needed. */
+  table.live-table thead th { position: sticky; top: 0; background: var(--bg, #fff); }
+  table.live-table tbody tr:hover { background: #f5f5f5; cursor: pointer; }
+  table.live-table tbody tr:hover td { background: inherit; }
+
+  /* SNR is numeric -- right-justify it like any other number column
+     (matches the same .col-snr convention used on WSJT-X Remote's table,
+     DX Monitor's list, and QSL Helper's at-risk table). */
+  table.live-table .col-snr { text-align: right; }
+  /* DXCC country names and decode Message text are the two columns most
+     likely to run long ("Republic of Korea", a full FT8 message) -- rather
+     than force the whole table wider (or truncate with the ellipsis every
+     other column gets), let just these two wrap onto a second line within
+     whatever width the column currently has. */
+  table.live-table .col-dxcc, table.live-table .col-message { white-space: normal; word-break: break-word; }
+
+  .col-resize-handle { position: absolute; top: 0; right: -3px; bottom: 0; width: 6px; cursor: col-resize; z-index: 2; touch-action: none; }
+  .col-resize-handle:hover, .col-resize-handle.active { background: color-mix(in srgb, var(--fg, #000) 30%, transparent); }
+
+  .row-cq-mismatch { text-decoration: line-through; opacity: 0.45; }
+  .row-new-dxcc { background: #fff3cd; }
+  .row-new-dxcc.row-confirmed { background: #d4edda; }
+  .row-worked { color: #999; }
+  .row-flash { animation: live-flash 0.6s ease-out; }
+  @keyframes live-flash { from { background: #cfe8ff; } to { background: transparent; } }
+
+  /* Matches WSJT-X's own Band Activity highlight for messages directed at
+     your callsign -- takes priority over the worked/new-DXCC backgrounds
+     above since it's declared after them. */
+  .row-directed { background: #ff9d9d; }
+  .time-bold { font-weight: 700; }
+
+  .status-confirmed { color: #2e7d32; font-weight: 600; }
+  .status-worked { color: #e67e22; font-weight: 600; }
+  .status-none { color: #c62828; }
+  .status-unknown { color: inherit; }
+
+  .tag { display: inline-block; border-radius: 3px; padding: 0 0.3rem; font-size: 0.75rem; margin-left: 0.25rem; }
+  .tag-new { background: #ffc107; color: #333; }
+  .tag-confirmed { background: #28a745; color: #fff; }
+  .tag-worked { background: #ddd; color: #555; }
+  .tag-cq { background: #17a2b8; color: #fff; }
+
+  .call-link { text-decoration: underline dotted; cursor: pointer; }
+  .qrz-link { color: #888; text-decoration: none; font-size: 0.7rem; border: 1px solid var(--border, #ccc); border-radius: 3px; padding: 0 0.25rem; margin-left: 0.25rem; }
+  .qrz-link:hover { color: #1565c0; border-color: #1565c0; }
+
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
+  .modal-box { background: var(--bg, #fff); border-radius: 6px; padding: 1rem 1.25rem; width: min(600px, 92vw); max-height: 85vh; overflow-y: auto; box-shadow: 0 8px 30px rgba(0,0,0,0.3); }
+  .modal-box h3 { margin: 0 0 0.3rem; }
+  .history-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.4rem; font-size: 0.82rem; margin: 0.6rem 0; }
+  .history-summary div { background: color-mix(in srgb, var(--bg, #fff) 92%, var(--fg, #000)); border-radius: 4px; padding: 0.35rem 0.5rem; }
+  .history-lines { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; max-height: 40vh; overflow-y: auto; background: #fafafa; padding: 0.5rem; border-radius: 4px; }
+  .history-lines div.tx { color: #1565c0; }
+
+  /* Only relevant on the Dashboard widget variants (see
+     templates/live_monitor_widget.html) -- body[data-widget-mode] is never
+     set on the full page, so all three sections always show there
+     unchanged. Each rule is duplicated as a :host([data-widget-mode=...])
+     selector too -- a shadow-DOM-mounted applet (see dashboard.html /
+     static/live_monitor.js's mountLiveMonitor()) has no <body> element for
+     the body[...] half to ever match, and sets data-widget-mode on the
+     shadow host itself instead; :host() is valid CSS everywhere but only
+     *matches* inside a shadow tree, so one rule correctly covers both the
+     standalone/iframe page and the shadow-mounted applet without either
+     duplicating the whole block or breaking the other. */
+  body[data-widget-mode="selection"] .live-cq-section,
+  body[data-widget-mode="selection"] .live-noncq-section,
+  :host([data-widget-mode="selection"]) .live-cq-section,
+  :host([data-widget-mode="selection"]) .live-noncq-section { display: none; }
+  .live-merged-section { display: none; }
+  body[data-widget-mode="merged"] .live-selection-section,
+  body[data-widget-mode="merged"] .live-cq-section,
+  body[data-widget-mode="merged"] .live-noncq-section,
+  :host([data-widget-mode="merged"]) .live-selection-section,
+  :host([data-widget-mode="merged"]) .live-cq-section,
+  :host([data-widget-mode="merged"]) .live-noncq-section { display: none; }
+  /* The above only hides the cq/noncq *sections* -- their parent
+     .live-panels wrapper div (a second, separate one from
+     .live-merged-section's own) was never itself hidden, so it sat there
+     empty but still display:flex and (once the flex-fill rule below gives
+     any [data-widget-mode="merged"] .live-panels height:100%) claiming a
+     full tile's height of blank space above the actual merged table --
+     confirmed live as the literal whitespace-at-top bug. Hide the whole
+     empty wrapper, not just its contents. */
+  body[data-widget-mode="merged"] .live-panels:not(.live-merged-section),
+  :host([data-widget-mode="merged"]) .live-panels:not(.live-merged-section) { display: none; }
+  body[data-widget-mode="merged"] .live-merged-section,
+  :host([data-widget-mode="merged"]) .live-merged-section { display: block; }
+  body[data-widget-mode="cq"] .live-selection-section,
+  body[data-widget-mode="cq"] .live-noncq-section,
+  :host([data-widget-mode="cq"]) .live-selection-section,
+  :host([data-widget-mode="cq"]) .live-noncq-section { display: none; }
+  body[data-widget-mode="noncq"] .live-selection-section,
+  body[data-widget-mode="noncq"] .live-cq-section,
+  :host([data-widget-mode="noncq"]) .live-selection-section,
+  :host([data-widget-mode="noncq"]) .live-cq-section { display: none; }
+</style>
+
+<div class="live-selection-section">
+<div class="live-toolbar">
+  <span><span id="conn-dot"></span> <span id="conn-text">connecting…</span></span>
+  <label>My call <input id="my-call" type="text" value="{{ my_call }}" size="10"></label>
+  <label><input id="cq-filter" type="checkbox" checked> Dim CQs not for my call area</label>
+  <label><input id="hide-worked" type="checkbox"> Hide already-worked</label>
+  <span>WSJT-X UDP port {{ udp_port }}</span>
+</div>
+
+<div class="scope-bar">
+  <span>Worked/confirmed match:</span>
+  <label><input id="scope-band" type="checkbox" checked> Band</label>
+  <label><input id="scope-mode" type="checkbox"> Mode</label>
+  <span class="legend">
+    <span><span class="swatch sw-confirmed"></span>Confirmed (LoTW)</span>
+    <span><span class="swatch sw-worked"></span>Worked, not confirmed</span>
+    <span><span class="swatch sw-none"></span>No contact</span>
+  </span>
+  <span style="margin-left:auto; color:#888;">Double-click a row to call that station in WSJT-X</span>
+</div>
+
+<div id="live-status">No WSJT-X status received yet -- check WSJT-X Settings / Reporting / UDP Server is enabled and pointed at 127.0.0.1:{{ udp_port }}.</div>
+</div>
+
+<div class="live-panels">
+  <div class="live-panel live-cq-section">
+    <h2>CQs</h2>
+    <div class="live-panel-scroll">
+      <table class="live-table">
+        <thead>
+          <tr><th class="col-time">Time</th><th class="col-band">Band</th><th class="col-mode">Mode</th><th class="col-snr">SNR</th><th class="col-call">Call</th><th class="col-grid">Grid</th><th class="col-dxcc">DXCC</th><th class="col-message">Message</th><th class="col-flags">Flags</th></tr>
+        </thead>
+        <tbody id="cq-body"></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="live-panel live-noncq-section">
+    <h2>Non-CQs</h2>
+    <div class="live-panel-scroll">
+      <table class="live-table">
+        <thead>
+          <tr><th class="col-time">Time</th><th class="col-band">Band</th><th class="col-mode">Mode</th><th class="col-snr">SNR</th><th class="col-call">Call</th><th class="col-grid">Grid</th><th class="col-dxcc">DXCC</th><th class="col-message">Message</th><th class="col-flags">Flags</th></tr>
+        </thead>
+        <tbody id="noncq-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Dashboard-widget-only: CQs and non-CQs interleaved into one list by
+     time, instead of the two side-by-side panels above -- hidden by
+     default (only shown in the "merged" widget mode, see the CSS at the
+     top of this file), never shown on the full page or any other widget
+     mode. Every decode still renders into this table too, unconditionally,
+     same "always populate regardless of which section is visible" approach
+     already used for the cq/noncq split above -- see renderDecode() in
+     static/live_monitor.js. -->
+<div class="live-panels live-merged-section">
+  <div class="live-panel" style="flex: 1 1 100%;">
+    <h2>CQs + Non-CQs</h2>
+    <div class="live-panel-scroll">
+      <table class="live-table">
+        <thead>
+          <tr><th class="col-time">Time</th><th class="col-band">Band</th><th class="col-mode">Mode</th><th class="col-snr">SNR</th><th class="col-call">Call</th><th class="col-grid">Grid</th><th class="col-dxcc">DXCC</th><th class="col-message">Message</th><th class="col-flags">Flags</th></tr>
+        </thead>
+        <tbody id="merged-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div id="history-overlay" class="modal-overlay" style="display:none;">
+  <div class="modal-box">
+    <h3 id="history-title">Callsign</h3>
+    <div id="history-summary" class="history-summary"></div>
+    <div id="history-lines" class="history-lines"></div>
+    <div style="margin-top:0.6rem;">
+      <button id="history-close">Close</button>
+    </div>
+  </div>
+</div>

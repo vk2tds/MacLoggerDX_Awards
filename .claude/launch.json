@@ -3,7 +3,7 @@
   "configurations": [
     {
       "name": "awards-webapp",
-      "runtimeExecutable": "python3",
+      "runtimeExecutable": "/Users/darryl/Applications/MacLoggerDXAwardsPython.app/Contents/MacOS/Python",
       "runtimeArgs": ["app.py"],
       "port": 5050
     }

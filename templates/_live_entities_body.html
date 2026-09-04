@@ -1,0 +1,110 @@
+<style>
+  .dx-toolbar { display: flex; flex-wrap: wrap; gap: 0.4rem 0.9rem; align-items: center; margin-bottom: 0.4rem; font-size: 0.85rem; }
+  #dx-conn-dot { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 50%; background: #999; }
+  #dx-conn-dot.up { background: #2e7d32; }
+  #dx-conn-dot.down { background: #c62828; }
+
+  .dx-filter-group { display: flex; gap: 0.75rem; font-size: 0.85rem; }
+  .dx-filter-group label { display: flex; align-items: center; gap: 0.25rem; white-space: nowrap; }
+  #dx-current { margin-left: auto; font-size: 0.78rem; color: #666; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+  #dx-call-status { font-size: 0.78rem; color: #666; white-space: nowrap; }
+  #dx-clear-btn { font-size: 0.8rem; padding: 0.25rem 0.7rem; }
+
+  /* Experimental larger UTC clock -- easy to see at a glance while
+     watching this page, e.g. for lining up with FT8's 15s cycles. Size is
+     a first pass, adjust freely. */
+  .dx-utc-clock { font-size: 2rem; font-weight: 700; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.02em; }
+
+  .dx-group { border: 1px solid #ccc; border-radius: 6px; padding: 0.5rem 0.85rem; margin-bottom: 0.5rem; max-width: 46em; }
+  .dx-header { display: flex; justify-content: space-between; align-items: baseline; font-weight: 600; font-size: 0.95rem; margin-bottom: 0.3rem; border-bottom: 1px solid #eee; padding-bottom: 0.25rem; }
+  .dx-last-heard { font-weight: 400; font-size: 0.78rem; color: #888; white-space: nowrap; }
+  .dx-call-row { display: flex; align-items: center; gap: 1rem; font-size: 0.85rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; padding: 0.1rem 0; cursor: pointer; border-radius: 3px; }
+  .dx-call-row:hover { background: #f2f2f2; }
+  .dx-call { min-width: 8em; }
+  .dx-snr { min-width: 4em; color: #555; text-align: right; }
+  .dx-time { color: #888; }
+  .dx-freq { min-width: 8em; color: #555; }
+  .dx-empty { color: #888; font-size: 0.85rem; }
+
+  .dx-activity { display: flex; gap: 2px; margin-left: auto; }
+  .dx-box { width: 11px; height: 11px; border-radius: 2px; border: 1px solid rgba(0,0,0,0.15); }
+
+  .status-confirmed { color: #2e7d32; font-weight: 600; }
+  .status-worked { color: #e67e22; font-weight: 600; }
+  .status-none { color: #c62828; }
+  .status-unknown { color: inherit; }
+
+  .dx-find-box { border: 1px solid #ccc; border-radius: 6px; padding: 0.35rem 0.6rem 0.45rem; margin-bottom: 0.4rem; max-width: 46em; }
+  .dx-find-box legend { font-weight: 600; font-size: 0.82rem; padding: 0 0.3rem; }
+  .dx-find-bands { display: flex; flex-wrap: wrap; gap: 0.35rem 0.7rem; font-size: 0.8rem; margin-bottom: 0.3rem; }
+  .dx-find-bands label { display: flex; align-items: center; gap: 0.2rem; white-space: nowrap; }
+  .dx-find-controls { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; flex-wrap: wrap; }
+  #find-status { color: #666; }
+  #find-cancel-btn:disabled, #find-scan-btn:disabled { opacity: 0.5; }
+
+  /* Per-band frequency-activity grid, under the Find controls -- one column
+     per band, one row per Find-flagged preset on that band, boxes styled
+     like the per-callsign activity boxes (activityColor() ramp) but WHITE
+     instead of grey when that preset's checkbox isn't currently checked
+     (i.e. it isn't part of the active scan selection right now). */
+  .dx-freq-grid { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; margin-top: 0.35rem; padding-top: 0.3rem; border-top: 1px solid #eee; }
+  .freq-band-col { display: flex; flex-direction: column; gap: 0.1rem; min-width: 5.5em; }
+  .freq-band-header { font-weight: 600; font-size: 0.75rem; text-align: center; border-bottom: 1px solid #ddd; padding-bottom: 0.15rem; margin-bottom: 0.05rem; }
+  .freq-row { display: flex; align-items: center; justify-content: space-between; gap: 0.3rem; font-size: 0.7rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #555; }
+  .freq-row .dx-activity { margin-left: 0; }
+  .freq-row .dx-box { width: 9px; height: 9px; }
+
+  /* Only relevant on the Dashboard widget variants (see
+     templates/live_entities_widget.html) -- body[data-widget-mode] is never
+     set on the full page, so both sections always show there unchanged.
+     Each rule is duplicated as a :host([data-widget-mode=...]) selector too
+     -- a shadow-DOM-mounted applet (see dashboard.html /
+     static/live_entities.js's mountLiveEntities()) has no <body> element for
+     the body[...] half to ever match, and sets data-widget-mode on the
+     shadow host itself instead; :host() is valid CSS everywhere but only
+     *matches* inside a shadow tree, so one rule correctly covers both the
+     standalone/iframe page and the shadow-mounted applet without either
+     duplicating the whole block or breaking the other. */
+  body[data-widget-mode="find"] .dx-list-section,
+  :host([data-widget-mode="find"]) .dx-list-section { display: none; }
+  body[data-widget-mode="list"] .dx-find-section,
+  :host([data-widget-mode="list"]) .dx-find-section { display: none; }
+
+  /* Dashboard-widget context: dash-tile-header/dash-tile-body already
+     frames this tile -- drop .dx-find-box's own border so the Find widget
+     doesn't show a box inside a box. See the near-identical note in
+     _radio_control_body.html. */
+  body[data-widget-mode] .dx-find-box,
+  :host([data-widget-mode]) .dx-find-box { border: none; border-radius: 0; padding: 0.35rem 0; max-width: none; }
+</style>
+
+<div class="dx-find-section">
+<fieldset class="dx-find-box">
+  <legend>Find</legend>
+  <div class="dx-find-bands" id="dx-find-bands"></div>
+  <div class="dx-find-controls">
+    <label><input type="checkbox" id="find-tune-enabled"> Tune each band</label>
+    <label><input type="checkbox" id="find-loop"> Loop</label>
+    <button id="find-scan-btn" type="button">Scan</button>
+    <button id="find-cancel-btn" type="button" disabled>Cancel</button>
+    <span id="find-status"></span>
+  </div>
+  <div class="dx-freq-grid" id="dx-freq-grid"></div>
+</fieldset>
+
+<div class="dx-toolbar">
+  <span id="dx-conn-dot"></span> <span id="dx-conn-text">connecting…</span>
+  <span class="dx-filter-group">
+    <label><input type="radio" name="dx-filter" value="all" checked> Everything</label>
+    <label><input type="radio" name="dx-filter" value="band"> Current band</label>
+    <label><input type="radio" name="dx-filter" value="band_freq"> Current band + frequency</label>
+  </span>
+  <button id="dx-clear-btn" type="button">Clear</button>
+  <span id="dx-current"></span>
+  <span id="dx-call-status"></span>
+</div>
+</div>
+
+<div class="dx-list-section">
+<div id="dx-entities"></div>
+</div>

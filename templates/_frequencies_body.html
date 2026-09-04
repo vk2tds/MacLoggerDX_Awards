@@ -1,0 +1,59 @@
+<style>
+  .fq-shell { background: #ececec; border: 1px solid #b8b8b8; border-radius: 8px; padding: 0.75rem; font-family: -apple-system, "Segoe UI", sans-serif; color: #111; max-width: 56em; margin-bottom: 1rem; overflow-x: auto; }
+  .fq-table { width: 100%; min-width: 42em; border-collapse: collapse; font-size: 0.85rem; margin-bottom: 0.6rem; }
+  .fq-table th { text-align: left; font-size: 0.75rem; color: #666; padding: 0.2rem 0.4rem; }
+  .fq-table td { padding: 0.2rem 0.4rem; border-top: 1px solid #d8d8d8; }
+  .fq-table td.check { text-align: center; }
+  .fq-table input[type=text] { width: 10em; font-size: 0.85rem; padding: 0.2rem 0.3rem; }
+  .fq-table input[type=text].freq { width: 8em; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .fq-table button { cursor: pointer; border: 1px solid #999; background: #f4f4f4; border-radius: 3px; padding: 0.2rem 0.5rem; font-size: 0.78rem; }
+  .fq-table button:hover { background: #e6e6e6; }
+  .fq-table button.danger { border-color: #c62828; color: #c62828; }
+  .fq-table .band { color: #777; font-size: 0.78rem; }
+
+  .action-result { font-size: 0.78rem; margin-left: 0.5rem; }
+  .action-result.ok { color: #2e7d32; }
+  .action-result.err { color: #c62828; }
+
+  /* Dashboard-widget context: dash-tile-header/dash-tile-body already
+     frames this tile -- drop .fq-shell's own card styling so a widget
+     doesn't show a box inside a box. See the near-identical note in
+     _radio_control_body.html. color:inherit too -- .fq-shell's own #111
+     was only readable against its own background; once that's gone, dark
+     mode left near-black text on a near-black tile (confirmed live). */
+  body[data-widget-mode] .fq-shell,
+  :host([data-widget-mode]) .fq-shell { background: none; border: none; border-radius: 0; padding: 0.5rem 0.65rem; max-width: none; color: inherit; }
+  /* ...except form controls: .fq-table's buttons keep their own light
+     background regardless of page theme, so color:inherit would leave
+     light dark-mode text on that light background (confirmed live on the
+     near-identical Radio Control case). Inputs need an explicit
+     background too, not just color -- they have none of their own, so
+     they were picking up the browser's native dark-mode form styling
+     instead, which is just as unreadable against forced-dark text. */
+  body[data-widget-mode] .fq-shell button,
+  :host([data-widget-mode]) .fq-shell button { color: #111; }
+  body[data-widget-mode] .fq-shell input,
+  :host([data-widget-mode]) .fq-shell input { color: #111; background: #fff; }
+</style>
+
+<div class="fq-shell">
+  <table class="fq-table">
+    <thead>
+      <tr>
+        <th>Name</th><th>Frequency (MHz)</th><th>Band</th>
+        <th>Remote</th><th>Find</th><th>Radio</th><th>RigDial</th>
+        <th colspan="2"></th>
+      </tr>
+    </thead>
+    <tbody id="fq-preset-rows"></tbody>
+    <tfoot>
+      <tr>
+        <td><input type="text" id="fq-new-name" placeholder="Name"></td>
+        <td><input type="text" class="freq" id="fq-new-freq" placeholder="14.074000"></td>
+        <td colspan="5"></td>
+        <td><button id="fq-add-btn">Add preset</button></td>
+      </tr>
+    </tfoot>
+  </table>
+  <span class="action-result" id="fq-preset-result"></span>
+</div>

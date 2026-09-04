@@ -36,10 +36,38 @@ def init_rigdial(app, config_path: str = "rigdial_config.json", presets_path: st
 def rigdial_view():
     return render_template(
         "rigdial.html",
-        button_actions=rigdial_bridge.BUTTON_ACTIONS,
         shuttle_actions=rigdial_bridge.SHUTTLE_ACTIONS,
-        button_count=rigdial_bridge.BUTTON_COUNT,
     )
+
+
+@rigdial_bp.route("/rigdial/widget")
+def rigdial_widget():
+    """Dashboard widget: the whole RigDial screen, unsplit -- see
+    templates/rigdial_widget.html and dashboard.py's module docstring for
+    the overall widget pattern. Unlike the multi-section pages, this one
+    has no sub-widgets to switch between (see the user's original widget
+    list), so there's no data-widget-mode/CSS-hiding here."""
+    return render_template(
+        "rigdial_widget.html",
+        shuttle_actions=rigdial_bridge.SHUTTLE_ACTIONS,
+    )
+
+
+@rigdial_bp.route("/rigdial/meta")
+def rigdial_meta():
+    """Static button-action/count constants for static/rigdial.js -- the
+    full page and standalone widget route get these via Jinja globals in an
+    inline <script> (see rigdial_view()/rigdial_widget() above), but a
+    shadow-DOM-mounted Dashboard applet never runs that <script> at all
+    (dashboard.html's mountApplet() deliberately skips <script> elements
+    when moving fetched markup into a shadow root), so mountRigDial() fetches
+    this instead of relying on window globals -- works identically either
+    way since the values themselves never change at runtime."""
+    return jsonify({
+        "button_actions": rigdial_bridge.BUTTON_ACTIONS,
+        "shuttle_actions": rigdial_bridge.SHUTTLE_ACTIONS,
+        "button_count": rigdial_bridge.BUTTON_COUNT,
+    })
 
 
 @rigdial_bp.route("/rigdial/status")

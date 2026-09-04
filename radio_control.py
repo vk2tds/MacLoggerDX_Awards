@@ -26,6 +26,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import threading
 import time
 from typing import Optional
 
@@ -253,6 +254,11 @@ _BINARY_SEARCH_PATHS = ["/usr/local/bin", "/opt/homebrew/bin", "/opt/local/bin"]
 # interface -- filtered out of the device picker so it isn't cluttered.
 _SERIAL_DEVICE_IGNORE = {"cu.Bluetooth-Incoming-Port", "cu.debug-console"}
 
+# How often the watchdog checks whether a managed rigctld is still alive.
+# Cheap per-tick (one PID check, one `ps`, no rigctld I/O at all unless it's
+# actually dead), so this can be fairly tight without real cost.
+RIGCTLD_WATCHDOG_POLL_INTERVAL_S = 15.0
+
 
 def find_rigctld_binary(override: Optional[str] = None) -> Optional[str]:
     if override and os.path.isfile(override) and os.access(override, os.X_OK):
@@ -344,6 +350,22 @@ class RigctldProcessManager:
         if os.path.exists(self.state_path):
             os.remove(self.state_path)
 
+    def _clear_dead_pid(self):
+        """The tracked process is gone -- drop the PID/started_at bookkeeping
+        but keep `watchdog_enabled` as-is. That flag is the only thing
+        distinguishing "it crashed, please restart it" (still True) from an
+        explicit stop() (which sets it False) -- wiping the whole state file
+        here would erase that distinction and the watchdog would think a
+        crash was actually a deliberate stop."""
+        state = self._load_state()
+        state.pop("pid", None)
+        state.pop("started_at", None)
+        state.pop("command", None)
+        if state:
+            self._save_state(state)
+        else:
+            self._clear_state()
+
     def _tracked_pid(self) -> Optional[int]:
         """The PID we last spawned, but only if it's still alive AND still
         actually a rigctld process -- a bare PID number surviving in a JSON
@@ -355,7 +377,7 @@ class RigctldProcessManager:
         try:
             os.kill(pid, 0)
         except OSError:
-            self._clear_state()
+            self._clear_dead_pid()
             return None
         try:
             comm = subprocess.run(
@@ -364,7 +386,7 @@ class RigctldProcessManager:
         except (OSError, subprocess.TimeoutExpired):
             comm = ""
         if "rigctld" not in comm:
-            self._clear_state()
+            self._clear_dead_pid()
             return None
         return pid
 
@@ -415,6 +437,7 @@ class RigctldProcessManager:
             "external_running": listen_reachable and pid is None,
             "binary_path": find_rigctld_binary(cfg.binary_path or None),
             "started_at": state.get("started_at") if pid else None,
+            "watchdog_enabled": bool(state.get("watchdog_enabled")),
             "config": cfg.to_dict(),
         }
 
@@ -452,30 +475,39 @@ class RigctldProcessManager:
         if proc.poll() is not None:
             return False, f"rigctld exited immediately (code {proc.returncode}) -- check the log"
 
-        self._save_state({"pid": proc.pid, "started_at": time.time(), "command": cmd})
+        # watchdog_enabled=True marks this as a deliberate "should be
+        # running" state, surviving the process's own death -- see
+        # _watchdog_tick() below and the stop()/_clear_dead_pid() comments.
+        self._save_state({"pid": proc.pid, "started_at": time.time(), "command": cmd, "watchdog_enabled": True})
         return True, f"Started (PID {proc.pid})"
 
     def stop(self) -> tuple:
         pid = self._tracked_pid()
         if pid is None:
+            # Nothing to kill, but still record the user's intent -- without
+            # this, a rigctld that had already crashed (state file still
+            # says watchdog_enabled=True from the last start()) would get
+            # silently revived by the watchdog moments after "Stop" reported
+            # there was nothing to stop.
+            self._save_state({"watchdog_enabled": False})
             return False, "Not managed by this app -- nothing to stop (may be running externally)"
         try:
             os.kill(pid, signal.SIGTERM)
         except ProcessLookupError:
-            self._clear_state()
-            return True, "Already stopped"
-        for _ in range(30):
-            try:
-                os.kill(pid, 0)
-            except ProcessLookupError:
-                break
-            time.sleep(0.1)
+            pass
         else:
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-        self._clear_state()
+            for _ in range(30):
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.1)
+            else:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+        self._save_state({"watchdog_enabled": False})
         return True, "Stopped"
 
     def restart(self) -> tuple:
@@ -494,6 +526,40 @@ class RigctldProcessManager:
             return "".join(lines[-n:])
         except OSError:
             return ""
+
+    # -- watchdog: auto-restart if a managed rigctld dies unexpectedly ------
+    #
+    # start()/stop() were the only ways rigctld's lifecycle was touched --
+    # once running, nothing ever checked on it again. A brief network/USB
+    # disruption is enough to make rigctld give up and exit (observed live
+    # 2026-09-04: a network disruption killed it, and it just stayed dead
+    # until someone noticed the Radio tab was erroring and clicked Start).
+    # This polls periodically and restarts it, but only while
+    # `watchdog_enabled` says the *last explicit action* was start() rather
+    # than stop() -- see start()/stop()/_clear_dead_pid() above for how that
+    # flag survives the process's own death without surviving a deliberate
+    # stop.
+    def _watchdog_tick(self):
+        state = self._load_state()
+        if not state.get("watchdog_enabled"):
+            return
+        if self._tracked_pid() is not None:
+            return
+        log.warning("rigctld watchdog: managed process is no longer running -- restarting")
+        ok, message = self.start()
+        if not ok:
+            log.error("rigctld watchdog: restart attempt failed -- %s", message)
+
+    def _watchdog_loop(self):
+        while True:
+            time.sleep(RIGCTLD_WATCHDOG_POLL_INTERVAL_S)
+            try:
+                self._watchdog_tick()
+            except Exception:
+                log.exception("rigctld watchdog tick raised")
+
+    def start_watchdog(self):
+        threading.Thread(target=self._watchdog_loop, name="rigctld-watchdog", daemon=True).start()
 
 
 # ---------------------------------------------------------------------------
@@ -538,12 +604,26 @@ def init_radio_control(app, config: RigctldConfig,
         seed_cfg.listen_port = config.port
         _process.save_config(seed_cfg)
         _rebuild_client(seed_cfg, config.timeout_s)
+    _process.start_watchdog()
     app.register_blueprint(radio_bp)
 
 
 @radio_bp.route("/radio")
 def radio_view():
     return render_template("radio.html", bands=list(FT8_CALLING_FREQ_HZ.keys()))
+
+
+@radio_bp.route("/radio/widget/<mode>")
+def radio_widget(mode):
+    """Dashboard widget: the radio-control box (frequency/mode/band/RIT/XIT/
+    power/PTT) or the rigctld-process box (start/stop/restart, config, log)
+    -- see templates/radio_widget.html and dashboard.py's module docstring
+    for the overall widget pattern. Renders the exact same markup/JS as the
+    full page (templates/_radio_control_body.html,
+    static/radio_control.js), the other section is just hidden via CSS."""
+    if mode not in ("control", "proc", "freq"):
+        return render_template("error.html", error="Unknown widget: %r" % mode), 404
+    return render_template("radio_widget.html", widget_mode=mode)
 
 
 @radio_bp.route("/radio/status")
