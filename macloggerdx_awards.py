@@ -478,6 +478,7 @@ class analysis():
         detailsQ = res.fetchall()
         for count, band_tx, dxcc_country in detailsQ:
             dxcc_country = normalize_country(dxcc_country)
+            band_tx = (band_tx or '').upper()
             if not dxcc_country in working:
                 working[dxcc_country] = OrderedDict()
                 working[dxcc_country]['160M'] = None
@@ -503,6 +504,7 @@ class analysis():
         detailsL = res.fetchall()
         for count, band_tx, dxcc_country in detailsL:
             dxcc_country = normalize_country(dxcc_country)
+            band_tx = (band_tx or '').upper()
             s = working[dxcc_country][band_tx]
             (qso, lotw, card) = s.split(',')
             lotw = int(lotw) + count
@@ -512,6 +514,7 @@ class analysis():
         detailsC = res.fetchall()
         for count, band_tx, dxcc_country in detailsC:
             dxcc_country = normalize_country(dxcc_country)
+            band_tx = (band_tx or '').upper()
             s = working[dxcc_country][band_tx]
             (qso, lotw, card) = s.split(',')
             card = int(card) + count

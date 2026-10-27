@@ -124,6 +124,35 @@ class RigctldClient:
 
     def set_freq(self, hz: float):
         self._command(f"\\set_freq {int(hz)}")
+        # A frequency change from this app must never leave the rig split:
+        # with split on, TX stays on VFO B (wherever it last was) while we
+        # just moved VFO A -- transmitting on 50 MHz after tuning to 21 MHz
+        # (confirmed live 2026-10-15; WSJT-X's "Rig" split mode sets this).
+        try:
+            self.ensure_split_off()
+        except (RigctldError, RigctldConnectionError):
+            pass
+
+    def get_split(self) -> bool:
+        lines = self._command("\\get_split_vfo", expect_lines=2)
+        return bool(lines) and lines[0].strip() == "1"
+
+    def set_split(self, on: bool):
+        self._command("\\set_split_vfo 1 VFOB" if on else "\\set_split_vfo 0 VFOA")
+
+    def ensure_split_off(self) -> bool:
+        """Turn split off unless the operator explicitly allowed it (see
+        split_allowed()). Never touches split while keyed. Returns True if
+        it actually had to switch split off."""
+        if split_allowed():
+            return False
+        if self.get_ptt():
+            return False
+        if self.get_split():
+            self.set_split(False)
+            log.warning("Split was on without being requested -- turned it off")
+            return True
+        return False
 
     def get_mode(self) -> tuple:
         lines = self._command("\\get_mode", expect_lines=2)
@@ -228,8 +257,11 @@ class RigctldClient:
             except (RigctldError, RigctldConnectionError):
                 pass
 
+        split, split_error = optional(self.get_split)
+
         return {
             "connected": True,
+            "split": split, "split_error": split_error, "split_allowed": split_allowed(),
             "frequency_hz": freq_hz,
             "band": freq_to_band(freq_hz),
             "mode": mode,
@@ -384,11 +416,49 @@ class RigctldProcessManager:
                 ["ps", "-p", str(pid), "-o", "comm="], capture_output=True, text=True, timeout=2,
             ).stdout.strip()
         except (OSError, subprocess.TimeoutExpired):
-            comm = ""
+            # `ps` itself failing (load, fork pressure) says nothing about
+            # the process -- os.kill(pid, 0) above already proved it's
+            # alive. Treating this as "not rigctld" wiped a healthy
+            # rigctld from the state file (confirmed live 2026-10-09: PID
+            # 90241 ran 16 days untracked, and the watchdog's repeated
+            # failed respawns -- each briefly opening the serial port --
+            # made the radio click every few seconds).
+            return pid
         if "rigctld" not in comm:
             self._clear_dead_pid()
             return None
         return pid
+
+    def _adopt_listening_rigctld(self) -> Optional[int]:
+        """If a rigctld we've lost track of is already serving our port,
+        re-adopt its PID into the state file instead of spawning a second
+        one that can only fail (and poke the serial port doing so)."""
+        cfg = self.load_config()
+        try:
+            out = subprocess.run(
+                ["lsof", "-nP", f"-iTCP:{cfg.listen_port}", "-sTCP:LISTEN", "-t"],
+                capture_output=True, text=True, timeout=3,
+            ).stdout.split()
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        for token in out:
+            if not token.isdigit():
+                continue
+            pid = int(token)
+            try:
+                comm = subprocess.run(
+                    ["ps", "-p", str(pid), "-o", "comm="], capture_output=True, text=True, timeout=2,
+                ).stdout.strip()
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            if "rigctld" in comm:
+                state = self._load_state()
+                state.update({"pid": pid, "started_at": state.get("started_at") or time.time(),
+                              "watchdog_enabled": True})
+                self._save_state(state)
+                log.warning("Re-adopted untracked rigctld PID %s listening on port %s", pid, cfg.listen_port)
+                return pid
+        return None
 
     def rig_models(self) -> list:
         """Parses `rigctld -l`'s fixed-width table (id/mfg/model/version/
@@ -430,11 +500,21 @@ class RigctldProcessManager:
         except OSError:
             listen_reachable = False
         state = self._load_state()
+        # rigctld itself gives no sign of this at all -- it happily keeps
+        # running and listening on its TCP port even when the underlying
+        # USB-serial device has vanished (unplugged, powered off rig, or
+        # macOS just renumbered it after a reconnect), so every real command
+        # just times out with no explanation. Checking the configured
+        # device path directly gives an instant, correct answer instead of
+        # waiting for that timeout -- confirmed live 2026-09-22/23, this
+        # exact scenario happened twice in two days.
+        device_exists = os.path.exists(cfg.device) if cfg.device else None
         return {
             "managed_pid": pid,
             "managed_running": pid is not None,
             "listen_reachable": listen_reachable,
             "external_running": listen_reachable and pid is None,
+            "device_exists": device_exists,
             "binary_path": find_rigctld_binary(cfg.binary_path or None),
             "started_at": state.get("started_at") if pid else None,
             "watchdog_enabled": bool(state.get("watchdog_enabled")),
@@ -445,6 +525,8 @@ class RigctldProcessManager:
         cfg = self.load_config()
         if self._tracked_pid() is not None:
             return False, "Already running (managed by this app)"
+        if self._adopt_listening_rigctld() is not None:
+            return False, "Already running (re-adopted an untracked rigctld)"
         binary = find_rigctld_binary(cfg.binary_path or None)
         if not binary:
             return False, "rigctld binary not found -- install Hamlib (e.g. 'brew install hamlib') or set a binary path override"
@@ -545,6 +627,8 @@ class RigctldProcessManager:
             return
         if self._tracked_pid() is not None:
             return
+        if self._adopt_listening_rigctld() is not None:
+            return
         log.warning("rigctld watchdog: managed process is no longer running -- restarting")
         ok, message = self.start()
         if not ok:
@@ -586,6 +670,43 @@ def get_client() -> Optional[RigctldClient]:
     return _client
 
 
+# -- Split guard ----------------------------------------------------------
+# Split is OFF unless the operator explicitly allowed it. Persisted in its
+# own small file (not radio_process_state.json, whose start()/stop() rewrite
+# the whole dict and would silently drop it).
+_SPLIT_STATE_PATH = "radio_split_state.json"
+SPLIT_GUARD_INTERVAL_S = 10.0
+
+
+def split_allowed() -> bool:
+    try:
+        with open(_SPLIT_STATE_PATH, "r") as f:
+            return bool(json.load(f).get("allowed"))
+    except (OSError, ValueError):
+        return False
+
+
+def _set_split_allowed(allowed: bool):
+    tmp = _SPLIT_STATE_PATH + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump({"allowed": bool(allowed)}, f)
+    os.replace(tmp, _SPLIT_STATE_PATH)
+
+
+def _split_guard_loop():
+    while True:
+        time.sleep(SPLIT_GUARD_INTERVAL_S)
+        client = _client
+        if client is None:
+            continue
+        try:
+            client.ensure_split_off()
+        except (RigctldError, RigctldConnectionError):
+            pass  # rig/rigctld unreachable -- nothing to guard right now
+        except Exception:
+            log.exception("split guard tick failed")
+
+
 def init_radio_control(app, config: RigctldConfig,
                         process_config_path: str = "radio_process_config.json",
                         process_state_path: str = "radio_process_state.json",
@@ -605,6 +726,7 @@ def init_radio_control(app, config: RigctldConfig,
         _process.save_config(seed_cfg)
         _rebuild_client(seed_cfg, config.timeout_s)
     _process.start_watchdog()
+    threading.Thread(target=_split_guard_loop, name="split-guard", daemon=True).start()
     app.register_blueprint(radio_bp)
 
 
@@ -634,6 +756,23 @@ def radio_status():
         return jsonify({"connected": False, "error": str(exc)})
     except RigctldError as exc:
         return jsonify({"connected": True, "error": str(exc)})
+
+
+@radio_bp.route("/radio/split", methods=["GET", "POST"])
+def radio_split():
+    """GET: current split state + whether it's allowed. POST {allowed: bool}:
+    allow/disallow split. Disallowing also switches it off immediately."""
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        _set_split_allowed(bool(body.get("allowed")))
+    try:
+        if request.method == "POST":
+            _client.ensure_split_off()
+        return jsonify({"split": _client.get_split(), "allowed": split_allowed()})
+    except RigctldConnectionError as exc:
+        return jsonify({"split": None, "allowed": split_allowed(), "error": str(exc)}), 503
+    except RigctldError as exc:
+        return jsonify({"split": None, "allowed": split_allowed(), "error": str(exc)}), 502
 
 
 @radio_bp.route("/radio/frequency", methods=["POST"])

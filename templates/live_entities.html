@@ -1,25 +1,11 @@
 {% extends "base.html" %}
 {% block title %}DX Monitor{% endblock %}
 {% block content %}
-<div style="display:flex; align-items:baseline; gap:1.25rem; flex-wrap:wrap;">
+<div style="display:flex; align-items:baseline; gap:1.25rem; flex-wrap:wrap; margin-bottom:0.75rem;">
   <h1 style="margin:0;">DX Monitor</h1>
   <span id="dx-utc-clock" class="dx-utc-clock"></span>
+  <span id="dx-current"></span>
 </div>
-<p style="color:#666; font-size:0.85rem; max-width:60em; margin-top:-0.5rem;">
-  Same live decode feed as <a href="{{ url_for('live.live_view') }}">Live Monitor</a>, grouped by DXCC
-  entity instead of shown as a flat log -- most recently-heard entity on top, with up to 3 of its most
-  recently-heard distinct callsigns underneath. Colors match Live Monitor's worked/confirmed/none
-  scheme, scoped to band. Each station's own band and radio frequency (at the time it was heard) is
-  shown next to it. The six boxes after each callsign show how often it's been decoded in six
-  consecutive 15-minute windows covering the last 90 minutes -- hover a box for the exact count.
-  Entities disappear after 3 hours with no activity. Filter to Everything / Current band / Current
-  band + frequency; Clear removes only what the current filter shows -- WSJT-X's own Erase doesn't
-  touch this screen, since this is meant to keep a longer history than the live decode window does.
-  Double-click a callsign to call it -- retunes the radio to the frequency it was last heard on first,
-  if the radio isn't already there, then replies exactly as double-clicking that decode in WSJT-X
-  itself would.
-</p>
-
 {% include "_live_entities_body.html" %}
 
 <script src="{{ url_for('static', filename='live_entities.js') }}"></script>

@@ -77,6 +77,16 @@ def _build_scoped_index(rows) -> dict:
     for key, band, mode, qsl_received in rows:
         if key is None:
             continue
+        # ADIF's BAND field is case-insensitive by spec -- a QSO imported by
+        # a third-party tool (e.g. an ADIF upload) can land in the database
+        # as "15m" instead of "15M". Live decode lookups always compare
+        # against freq_to_band()'s uppercase output, so an un-normalized
+        # band here would make that QSO silently invisible to the worked/
+        # confirmed index (a station shown as never-worked despite a real
+        # logged QSO on that band). Confirmed live 2026-09-13 via two rows
+        # ADIF-imported through iDigi with band_tx="15m".
+        if band:
+            band = band.upper()
         confirmed = _is_lotw_or_cardc(qsl_received)
         idx["worked"]["overall"].add(key)
         if confirmed:
@@ -347,6 +357,12 @@ class LogStatusChecker:
         status.worked_before = True
         status.qso_count = len(rows)
         row_dicts = [dict(zip(select_cols, row)) for row in rows]
+        # See _build_scoped_index()'s comment: normalize band case here too,
+        # once, so every band_rx comparison below (all against freq_to_band()'s
+        # uppercase output) works regardless of how it was actually stored.
+        for r in row_dicts:
+            if r.get("band_rx"):
+                r["band_rx"] = r["band_rx"].upper()
 
         first = row_dicts[0]
         status.dxcc_country = first.get("dxcc_country")

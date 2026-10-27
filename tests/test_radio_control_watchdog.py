@@ -97,6 +97,27 @@ def test_watchdog_tick_restarts_after_crash_but_not_after_explicit_stop():
         assert status["managed_running"] is False
 
 
+def test_status_reports_whether_configured_device_exists():
+    """rigctld itself gives no sign when its USB-serial device vanishes --
+    it keeps running and listening fine, every real command just times out
+    with no explanation. status()'s device_exists field is what lets the UI
+    show that instantly instead. Confirmed live 2026-09-22/23: this exact
+    scenario (device unplugged/renumbered) happened twice in two days with
+    no warning anywhere in the app."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        mgr = _manager(tmpdir, "/usr/bin/true")  # never started -- device_exists doesn't need a running process
+        assert mgr.status()["device_exists"] is True  # _manager() configures device="/dev/null"
+
+        cfg = mgr.load_config()
+        cfg.device = os.path.join(tmpdir, "does-not-exist")
+        mgr.save_config(cfg)
+        assert mgr.status()["device_exists"] is False
+
+        cfg.device = ""
+        mgr.save_config(cfg)
+        assert mgr.status()["device_exists"] is None
+
+
 def test_clear_dead_pid_preserves_watchdog_enabled_flag():
     with tempfile.TemporaryDirectory() as tmpdir:
         mgr = _manager(tmpdir, _make_fake_rigctld(tmpdir))
@@ -112,3 +133,67 @@ def test_clear_dead_pid_preserves_watchdog_enabled_flag():
         assert state.get("watchdog_enabled") is True
         assert "pid" not in state
         assert "started_at" not in state
+
+
+def test_tracked_pid_survives_a_failing_ps_call():
+    """A failed/timed-out `ps` says nothing about the process; the state
+    file must keep a PID that os.kill(pid, 0) proved alive. Confirmed live
+    2026-10-09: treating it as "not rigctld" lost a healthy rigctld."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        mgr = _manager(tmpdir, "/usr/bin/true")
+        mgr._save_state({"pid": os.getpid(), "watchdog_enabled": True})
+        real_run = rc.subprocess.run
+
+        def boom(*a, **kw):
+            raise rc.subprocess.TimeoutExpired(cmd="ps", timeout=2)
+
+        rc.subprocess.run = boom
+        try:
+            assert mgr._tracked_pid() == os.getpid()
+        finally:
+            rc.subprocess.run = real_run
+
+
+def test_set_freq_turns_split_off_unless_allowed():
+    """TX must follow VFO A after an app-initiated retune. Confirmed live
+    2026-10-15: WSJT-X's "Rig" split left VFO B on 50 MHz while we tuned
+    VFO A to 21 MHz, so the rig transmitted on 50 MHz."""
+    sent = []
+
+    class FakeClient(rc.RigctldClient):
+        def __init__(self):
+            self.split = True
+            self.ptt = False
+
+        def _command(self, cmd, expect_lines=0):
+            sent.append(cmd)
+            if cmd.startswith("\\get_split_vfo"):
+                return ["1" if self.split else "0", "VFOB"]
+            if cmd.startswith("\\get_ptt"):
+                return ["1" if self.ptt else "0"]
+            if cmd.startswith("\\set_split_vfo 0"):
+                self.split = False
+            return []
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        old_cwd = os.getcwd()
+        os.chdir(tmpdir)
+        try:
+            c = FakeClient()
+            c.set_freq(21074000)
+            assert c.split is False
+            assert "\\set_split_vfo 0 VFOA" in sent
+
+            # explicitly allowed -> left alone
+            rc._set_split_allowed(True)
+            c.split = True
+            c.set_freq(14074000)
+            assert c.split is True
+
+            # never touched while keyed
+            rc._set_split_allowed(False)
+            c.ptt = True
+            assert c.ensure_split_off() is False
+            assert c.split is True
+        finally:
+            os.chdir(old_cwd)

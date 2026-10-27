@@ -4,6 +4,7 @@
   .radio-conn .dot { width: 0.8rem; height: 0.8rem; border-radius: 50%; background: #999; flex-shrink: 0; }
   .radio-conn .dot.up { background: #2e9c4a; }
   .radio-conn .dot.down { background: #c62828; }
+  .radio-conn .dot.warn { background: #e6a817; }
   .radio-conn .err { color: #b45309; }
 
   .freq-readout { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
@@ -156,6 +157,12 @@
     <button id="power-set-btn">Set</button>
     <span class="proc-hint" id="power-readout"></span>
     <span class="action-result" id="power-result"></span>
+  </div>
+
+  <div class="radio-row">
+    <label><input type="checkbox" id="split-allowed"> Allow split (TX and RX on different frequencies)</label>
+    <span class="proc-hint" id="split-readout"></span>
+    <span class="proc-hint">Split is switched off automatically unless this is ticked.</span>
   </div>
 
   <div class="radio-row">

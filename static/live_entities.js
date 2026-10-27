@@ -83,8 +83,11 @@ function mountLiveEntities(root, ctx, widgetMode) {
       currentBand = freqToBand(currentDialHz);
     }
     if ('transmitting' in ev) currentlyTransmitting = !!ev.transmitting;
-    currentReadout.textContent = currentBand
-      ? `Current: ${currentBand} ${(currentDialHz / 1e6).toFixed(6)}` : '';
+    if (currentReadout) {
+      currentReadout.textContent = currentBand
+        ? `${currentBand} ${(currentDialHz / 1e6).toFixed(3)}` : '';
+    }
+    trackAutoChaseTransmission(ev);
   }
 
   let filterMode = localStorage.getItem('dx_filter_mode') || 'all';
@@ -130,12 +133,13 @@ function mountLiveEntities(root, ctx, widgetMode) {
   }
   clearBtn.addEventListener('click', clearByFilter);
 
-  // Six equal 15-minute activity-box windows (per callsign, based on decode
+  // Six equal 6-minute activity-box windows (per callsign, based on decode
   // wall-clock times -- how often heard, not how often worked), covering
-  // the most recent 90 minutes. All six are the same width, so this is just
+  // the most recent 36 minutes. All six are the same width, so this is just
   // a raw count per box -- no normalization needed (that was only required
   // for the earlier variable-width design).
-  const ACTIVITY_BUCKET_MS = 15 * 60 * 1000;
+  const ACTIVITY_BUCKET_MINUTES = 6;
+  const ACTIVITY_BUCKET_MS = ACTIVITY_BUCKET_MINUTES * 60 * 1000;
   const ACTIVITY_BUCKET_COUNT = 6;
 
   // Entity/decode-history timeout deliberately matches the activity boxes'
@@ -157,7 +161,7 @@ function mountLiveEntities(root, ctx, widgetMode) {
       if (i >= 0 && i < ACTIVITY_BUCKET_COUNT) counts[i]++;
     });
     return counts.map((count, i) => ({
-      label: `${i * 15}-${(i + 1) * 15}m`, count,
+      label: `${i * ACTIVITY_BUCKET_MINUTES}-${(i + 1) * ACTIVITY_BUCKET_MINUTES}m`, count,
     }));
   }
 
@@ -270,7 +274,15 @@ function mountLiveEntities(root, ctx, widgetMode) {
     // of here, once their own decode history ages out.
   }
 
+  function pruneExpiredArms() {
+    const now = Date.now();
+    for (const [key, arm] of armedBoxes) {
+      if (now - arm.armedAt >= ARM_DURATION_MS) armedBoxes.delete(key);
+    }
+  }
+
   function pruneExpired() {
+    pruneExpiredArms();
     const now = Date.now();
     for (const [name, group] of entities) {
       if (now - (group.lastSeenWallClock ?? now) > TIMEOUT_MS) { entities.delete(name); continue; }
@@ -295,14 +307,33 @@ function mountLiveEntities(root, ctx, widgetMode) {
 
   const MAX_ROWS_PER_BOX = 3;
 
+  // Wall-clock time of the most recent decode among exactly the calls a box
+  // is built from. The box header used to show group.lastSeenWallClock,
+  // which is per-*entity* -- any decode from any band or any other callsign
+  // of the same DXCC refreshed it, so a 40M box whose only station was
+  // heard an hour ago could read "8m" because a different Croatian station
+  // was heard on another band 8 minutes ago (confirmed live 2026-10-13).
+  function boxLastSeen(callEntries, fallback) {
+    let latest = 0;
+    for (const [, info] of callEntries) {
+      const dt = info.decodeTimes || [];
+      if (dt.length) latest = Math.max(latest, dt[dt.length - 1]);
+    }
+    return latest || fallback;
+  }
+
   // Builds one .dx-group box's HTML from exactly the rows given -- callers
   // decide how many and which (an orange/red band box caps at 3 most
   // recent; a green box's row count follows its own more involved rule,
   // see computeGroupBoxes below, and must NOT be silently re-capped here).
   // `heading` is either just the DXCC name, or "Name - Band"; `showBandPerRow`
   // controls whether each row repeats the band (only useful when a single
-  // box spans more than one band).
-  function renderBox(heading, statusScope, callEntries, lastSeenWallClock, now, showBandPerRow) {
+  // box spans more than one band). `armKey` is one or more armKeyFor()
+  // keys joined with "|" (see boxArmKeyFor()) -- more than one only for the
+  // combined multi-band confirmed box (more than 3 green bands merged into
+  // one box with no single definite band), where the one button arms every
+  // band shown in that box at once.
+  function renderBox(heading, statusScope, callEntries, lastSeenWallClock, now, showBandPerRow, armKey) {
     const rows = callEntries.slice().sort((a, b) => (b[1].time_ms ?? 0) - (a[1].time_ms ?? 0));
     const callRows = rows.map(([callKey, info]) => {
       const boxes = computeActivityBoxes(info.decodeTimes || [], now).map(b => `
@@ -319,13 +350,34 @@ function mountLiveEntities(root, ctx, widgetMode) {
     `;
     }).join('');
     const agoMs = now - (lastSeenWallClock ?? now);
-    return `
+    const box = `
       <div class="dx-group">
         <div class="dx-header">
           <span class="${statusClass(statusScope)}">${escapeHtml(heading)}</span>
           <span class="dx-last-heard" title="Time since last heard">${fmtAgo(agoMs)}</span>
         </div>
         ${callRows}
+      </div>
+    `;
+    const arm = armStateForBox(armKey);
+    let armClass = '';
+    let armTitle = 'Auto-answer: click to answer any CQ heard in this box for the next 30 minutes';
+    if (arm) {
+      const remainingMs = ARM_DURATION_MS - (Date.now() - arm.armedAt);
+      const remainingMin = Math.max(0, Math.ceil(remainingMs / 60000));
+      const nearExpiry = remainingMs <= (ARM_DURATION_MS - ARM_WARNING_MS);
+      const hasGivenUp = boxHasBlacklist(armKey);
+      // Near-expiry takes priority over the partial-give-up color -- time
+      // running out is the more urgent/actionable thing to flag.
+      armClass = nearExpiry ? 'armed-orange' : (hasGivenUp ? 'armed-partial' : 'armed-green');
+      armTitle = `Auto-answer armed -- ${remainingMin} min remaining.`
+        + (hasGivenUp ? ' Given up on at least one station (no reply after 3 tries) -- resets automatically 6 min after that.' : '')
+        + ' Click to disarm.';
+    }
+    return `
+      <div class="dx-group-row">
+        <button type="button" class="dx-arm-btn ${armClass}" data-arm-key="${escapeHtml(armKey)}" title="${escapeHtml(armTitle)}">&#9889;</button>
+        ${box}
       </div>
     `;
   }
@@ -343,6 +395,13 @@ function mountLiveEntities(root, ctx, widgetMode) {
 
   const MAX_GREEN_BANDS_BEFORE_ONE_PER_BAND = 3;
 
+  // Sort priority for renderAll() -- lower sorts first. A never-worked
+  // opportunity (red) outranks one already worked but awaiting
+  // confirmation (purple), which outranks one already confirmed (green).
+  const STATUS_TIER_NONE = 0;
+  const STATUS_TIER_WORKED = 1;
+  const STATUS_TIER_CONFIRMED = 2;
+
   // One DXCC can become several boxes, split purely by each band's own
   // status:
   //  - Every not-yet-confirmed (orange/red) band gets its own box, up to 3
@@ -357,13 +416,13 @@ function mountLiveEntities(root, ctx, widgetMode) {
   //    bands are confirmed, padding stops making sense (3 rows couldn't
   //    represent them all anyway) and it switches to exactly one row per
   //    band instead, however many bands that is.
-  // Returns this DXCC's boxes as a flat array of { isGreen, lastTime, html }
-  // -- NOT bundled together as one per-DXCC unit. A DXCC that's confirmed
-  // on one band and not on another produces two independent boxes here,
-  // deliberately, so renderAll() below can sink the confirmed one to the
-  // bottom with every other DXCC's confirmed boxes while the not-yet-
-  // confirmed one stays up top with the other open opportunities -- they
-  // don't stay glued together just because they share a DXCC name.
+  // Returns this DXCC's boxes as a flat array of { statusTier, lastTime,
+  // html } -- NOT bundled together as one per-DXCC unit. A DXCC that's
+  // confirmed on one band and not on another produces two independent
+  // boxes here, deliberately, so renderAll() below can sink the confirmed
+  // one to the bottom with every other DXCC's confirmed boxes while the
+  // not-yet-confirmed one stays up top with the other open opportunities
+  // -- they don't stay glued together just because they share a DXCC name.
   function computeGroupBoxes(name, group, now) {
     const calls = Array.from(group.calls.entries())
       .filter(([, info]) => passesFilter(info))
@@ -381,7 +440,7 @@ function mountLiveEntities(root, ctx, widgetMode) {
     }
 
     const greenBands = [];
-    const boxes = []; // { isGreen, lastTime, html }
+    const boxes = []; // { statusTier, lastTime, html }
     for (const [band, bandCalls] of byBand.entries()) {
       const status = bandStatus(bandCalls);
       if (status === 'confirmed') {
@@ -389,9 +448,16 @@ function mountLiveEntities(root, ctx, widgetMode) {
         continue;
       }
       boxes.push({
-        isGreen: false,
+        // Never-worked ('none', red) outranks worked-but-unconfirmed
+        // ('worked', purple) -- a brand new opportunity is more actionable
+        // than one already in the log awaiting a QSL, so it stays higher
+        // even when the purple one was heard more recently than the red
+        // one. Confirmed live 2026-09-08: a "worked, not confirmed" entry
+        // heard seconds ago was sorting above "no contact" entries heard
+        // minutes ago, which reads as if it still needed a fresh QSO.
+        statusTier: status === 'none' ? STATUS_TIER_NONE : STATUS_TIER_WORKED,
         lastTime: bandCalls[0][1].time_ms ?? 0,
-        html: renderBox(`${name} - ${band}`, status, bandCalls.slice(0, MAX_ROWS_PER_BOX), group.lastSeenWallClock, now, false),
+        html: renderBox(`${name} - ${band}`, status, bandCalls.slice(0, MAX_ROWS_PER_BOX), boxLastSeen(bandCalls, group.lastSeenWallClock), now, false, armKeyFor(name, band)),
       });
     }
 
@@ -410,11 +476,12 @@ function mountLiveEntities(root, ctx, widgetMode) {
       greenRows.sort((a, b) => (b[1].time_ms ?? 0) - (a[1].time_ms ?? 0));
       const singleBand = greenBands.length === 1 ? greenBands[0][0] : null;
       boxes.push({
-        isGreen: true,
+        statusTier: STATUS_TIER_CONFIRMED,
         lastTime: Math.max(...greenRows.map(([, info]) => info.time_ms ?? 0)),
         html: renderBox(
           singleBand ? `${name} - ${singleBand}` : name,
-          'confirmed', greenRows, group.lastSeenWallClock, now, !singleBand,
+          'confirmed', greenRows, boxLastSeen(greenBands.flatMap(([, bc]) => bc), group.lastSeenWallClock), now, !singleBand,
+          singleBand ? armKeyFor(name, singleBand) : boxArmKeyFor(name, greenBands.map(([band]) => band)),
         ),
       });
     }
@@ -425,21 +492,23 @@ function mountLiveEntities(root, ctx, widgetMode) {
   function renderAll() {
     renderFreqGrid();
     pruneExpired();
+    disarmWorkedBoxes();
     if (entities.size === 0) {
       container.innerHTML = '<p class="dx-empty">No decodes yet -- waiting for WSJT-X.</p>';
       return;
     }
     const now = Date.now();
     // Flat list of every box across every DXCC -- deliberately NOT grouped
-    // back by DXCC before sorting. A confirmed (green) box sinks to the
-    // bottom with every other DXCC's confirmed boxes, regardless of
-    // whether *this* DXCC also still has a not-yet-confirmed band open on
-    // another box; that other box stays up top on its own. Within each
+    // back by DXCC before sorting. Three tiers, low to high effort already
+    // spent: never-worked (red) on top, worked-but-unconfirmed (purple) in
+    // the middle, confirmed (green) sinks to the bottom -- regardless of
+    // whether *this* DXCC also has a box open in another tier; boxes don't
+    // stay glued together just because they share a DXCC name. Within each
     // tier, most-recently-heard stays on top.
     const allBoxes = [];
     for (const [name, group] of entities) allBoxes.push(...computeGroupBoxes(name, group, now));
     allBoxes.sort((a, b) => {
-      if (a.isGreen !== b.isGreen) return a.isGreen ? 1 : -1;
+      if (a.statusTier !== b.statusTier) return a.statusTier - b.statusTier;
       return b.lastTime - a.lastTime;
     });
     const groupsHtml = allBoxes.map(b => b.html);
@@ -570,15 +639,16 @@ function mountLiveEntities(root, ctx, widgetMode) {
     });
   }
 
-  container.addEventListener('dblclick', async (e) => {
-    const row = e.target.closest('.dx-call-row');
-    if (!row) return;
-    const group = entities.get(row.dataset.entity);
-    const info = group && group.calls.get(row.dataset.call);
-    if (!info || !info.rawEvent) return;
-    // A running Find/Scan is actively re-tuning the radio -- calling a
-    // station only makes sense once the scan is genuinely out of the way,
-    // not just once it's been *asked* to stop.
+  // A running Find/Scan is actively re-tuning the radio -- calling a
+  // station (by double-click, or the auto-answer arm feature below) only
+  // makes sense once the scan is genuinely out of the way, not just once
+  // it's been *asked* to stop. Shared by both callers so auto-answer gets
+  // the exact same cross-tile/cross-tab coordination double-click already
+  // had -- without it, an armed auto-answer firing mid-scan would fight
+  // the scan's own /radio/frequency calls exactly like the double-click
+  // regression this logic was originally written for (see the 2026-08-16
+  // comment below).
+  async function ensureScanNotRunning() {
     if (!findCancelBtn.disabled) {
       // Scan is running in *this* instance -- cancel directly, no network
       // round trip needed. cancelScan() only sets flags and fires
@@ -587,26 +657,303 @@ function mountLiveEntities(root, ctx, widgetMode) {
       // call can't land after (and override) tuneAndCall()'s.
       cancelScan();
       if (activeScanPromise) await activeScanPromise;
-    } else {
-      // No scan running *here* -- but one might be running in a different
-      // tile/tab. /live/find_config's "scanning" flag is the server-
-      // persisted signal every instance already keeps in sync (used for
-      // the resume-on-reload feature), so check it before paying for the
-      // broadcast+wait round trip on the common case where nothing's
-      // scanning anywhere.
-      let scanningElsewhere = false;
-      try {
-        const cfg = await fetch('/live/find_config').then(r => r.json());
-        scanningElsewhere = !!cfg.scanning;
-      } catch (e) { /* best-effort -- fall through and tune anyway */ }
-      if (scanningElsewhere) {
-        const ackPromise = waitForScanCancelledAck(8000);
-        ctx.send({ action: 'request_scan_cancel' });
-        await ackPromise;
-      }
+      return;
     }
+    // No scan running *here* -- but one might be running in a different
+    // tile/tab. /live/find_config's "scanning" flag is the server-
+    // persisted signal every instance already keeps in sync (used for
+    // the resume-on-reload feature), so check it before paying for the
+    // broadcast+wait round trip on the common case where nothing's
+    // scanning anywhere.
+    let scanningElsewhere = false;
+    try {
+      const cfg = await fetch('/live/find_config').then(r => r.json());
+      scanningElsewhere = !!cfg.scanning;
+    } catch (e) { /* best-effort -- fall through and tune anyway */ }
+    if (scanningElsewhere) {
+      const ackPromise = waitForScanCancelledAck(8000);
+      ctx.send({ action: 'request_scan_cancel' });
+      await ackPromise;
+    }
+  }
+
+  container.addEventListener('dblclick', async (e) => {
+    const row = e.target.closest('.dx-call-row');
+    if (!row) return;
+    const group = entities.get(row.dataset.entity);
+    const info = group && group.calls.get(row.dataset.call);
+    if (!info || !info.rawEvent) return;
+    await ensureScanNotRunning();
     tuneAndCall(info.rawEvent);
   });
+
+  // -- Auto-answer arming ("chase this DXCC/band"): toggled per box (keyed
+  // by dxcc name + band, not by a specific callsign -- per the design
+  // discussion, arming answers *any* station heard in that box, not just
+  // whichever one was showing when armed). While armed, every CQ decode
+  // matching that box auto-replies exactly as a double-click would, for up
+  // to ARM_DURATION_MS. Deliberately local/in-memory only, not persisted
+  // or shared across tabs/tiles -- see the comment on armedBoxes below for
+  // the real, known limitation that leaves open.
+  const ARM_DURATION_MS = 30 * 60 * 1000;
+  const ARM_WARNING_MS = 25 * 60 * 1000; // switch green -> orange once armed this long (5 min before expiry)
+  // key: `${dxccName}@${band}` -> { armedAt }. Local to this mounted
+  // instance -- if DX Monitor is open in more than one tab/tile at once,
+  // each tracks arming independently and could both auto-reply to the same
+  // CQ. Not solved here (would need server-side coordination like Find/
+  // Scan's broadcast-cancel below); keep only one DX Monitor view open
+  // while relying on this feature.
+  const armedBoxes = new Map();
+
+  function armKeyFor(dxccName, band) {
+    return `${dxccName}@${band || ''}`;
+  }
+
+  // A box's own data-arm-key is one or more armKeyFor() keys joined with
+  // "|" -- more than one for the combined multi-band confirmed box (more
+  // than 3 green bands merged into a single box with no one definite
+  // band), where the button arms every band shown in that box at once
+  // rather than needing a separate button per row.
+  function boxArmKeyFor(dxccName, bands) {
+    return bands.map(band => armKeyFor(dxccName, band)).join('|');
+  }
+
+  function armStateFor(key) {
+    const arm = armedBoxes.get(key);
+    if (!arm) return null;
+    if (Date.now() - arm.armedAt >= ARM_DURATION_MS) {
+      armedBoxes.delete(key);
+      return null;
+    }
+    return arm;
+  }
+
+  // Display state for a box's button: armed if *any* of its constituent
+  // band-keys is currently armed (they're always set/cleared together by
+  // toggleArm() below, so in practice this is all-or-nothing).
+  function armStateForBox(boxArmKey) {
+    for (const key of boxArmKey.split('|')) {
+      const state = armStateFor(key);
+      if (state) return state;
+    }
+    return null;
+  }
+
+  // Give up on a specific callsign (not the whole box) after this many
+  // *real, over-the-air* transmissions to it with no progress -- see
+  // trackAutoChaseTransmission() below, which is what actually counts and
+  // enforces this (by force-sending Halt Tx once the threshold is hit); this
+  // constant is just the shared threshold. Still calling CQ elsewhere
+  // doesn't blacklist them -- only 3 identical, non-progressing
+  // transmissions to *this* callsign does. The box itself stays armed for
+  // any other callsign that calls CQ in it.
+  const CHASE_GIVE_UP_AFTER_REPLIES = 3;
+  // How long a given-up-on callsign stays given up on before auto-resetting
+  // back to normal (green), measured from our own last transmission to it --
+  // not from when they were last heard, since the whole point is giving
+  // them another chance even if they never came back to us specifically.
+  const CHASE_RESET_AFTER_MS = 6 * 60 * 1000;
+  // key: `${armKeyFor(dxccName,band)}|${call}` -> { replyCount, blacklisted, blacklistedAt }
+  const chaseState = new Map();
+
+  function chaseKeyFor(armKeyComponent, call) {
+    return `${armKeyComponent}|${call}`;
+  }
+
+  // Lazily expires a blacklist entry once CHASE_RESET_AFTER_MS has passed
+  // since it was set, same pattern as armStateFor()'s own lazy expiry.
+  function isStillBlacklisted(key, st) {
+    if (!st || !st.blacklisted) return false;
+    if (Date.now() - st.blacklistedAt >= CHASE_RESET_AFTER_MS) {
+      chaseState.delete(key);
+      return false;
+    }
+    return true;
+  }
+
+  function isBlacklisted(armKeyComponent, call) {
+    const key = chaseKeyFor(armKeyComponent, call);
+    return isStillBlacklisted(key, chaseState.get(key));
+  }
+
+  // Whether any callsign under this box (one or more armKeyFor() components
+  // joined with "|") has been given up on -- used to pick a distinct
+  // "armed but partly given up" button color, separate from plain armed and
+  // from the near-expiry warning color.
+  function boxHasBlacklist(boxArmKey) {
+    const prefixes = boxArmKey.split('|');
+    for (const [key, st] of Array.from(chaseState.entries())) {
+      if (isStillBlacklisted(key, st) && prefixes.some(p => key.startsWith(p + '|'))) return true;
+    }
+    return false;
+  }
+
+  function clearChaseStateForBox(boxArmKey) {
+    const prefixes = boxArmKey.split('|');
+    for (const key of Array.from(chaseState.keys())) {
+      if (prefixes.some(p => key.startsWith(p + '|'))) chaseState.delete(key);
+    }
+  }
+
+  function toggleArm(boxArmKey) {
+    const keys = boxArmKey.split('|');
+    const anyArmed = keys.some(k => armedBoxes.has(k));
+    // Always start fresh -- arming or disarming both clear any give-up
+    // state from a previous session, so re-arming genuinely means "try
+    // everyone again" rather than silently keeping an old blacklist.
+    clearChaseStateForBox(boxArmKey);
+    if (anyArmed) {
+      keys.forEach(k => armedBoxes.delete(k));
+    } else {
+      const armedAt = Date.now();
+      // startedNone: this band was still never-worked when armed. Only
+      // those arms auto-disarm once a contact is made (see
+      // disarmWorkedBoxes) -- deliberately arming an already-worked box
+      // (e.g. chasing a confirmation) is left alone.
+      keys.forEach(k => armedBoxes.set(k, { armedAt, startedNone: (currentBandStatusFor(k) ?? 'none') === 'none' }));
+    }
+    renderAll();
+  }
+
+  // Current per-band status ('none' / 'worked' / 'confirmed', or null if
+  // nothing is tracked) for an armKeyFor() key, from the most recent call
+  // seen in that dxcc+band -- same source the box colour uses.
+  function currentBandStatusFor(armKeyComponent) {
+    const at = armKeyComponent.lastIndexOf('@');
+    const group = entities.get(armKeyComponent.slice(0, at));
+    if (!group) return null;
+    const band = armKeyComponent.slice(at + 1);
+    const bandCalls = Array.from(group.calls.entries())
+      .filter(([, info]) => (info.band || '') === band)
+      .sort((a, b) => (b[1].time_ms ?? 0) - (a[1].time_ms ?? 0));
+    return bandCalls.length ? bandStatus(bandCalls) : null;
+  }
+
+  // The point of chasing a never-worked DXCC/band is to get the contact --
+  // once it's made (box goes red -> purple/green) stop auto-answering it.
+  function disarmWorkedBoxes() {
+    for (const [key, arm] of Array.from(armedBoxes.entries())) {
+      if (!arm.startedNone) continue;
+      const status = currentBandStatusFor(key);
+      if (status && status !== 'none') {
+        armedBoxes.delete(key);
+        clearChaseStateForBox(key);
+      }
+    }
+  }
+
+  container.addEventListener('click', (e) => {
+    const btn = e.target.closest('.dx-arm-btn');
+    if (!btn) return;
+    toggleArm(btn.dataset.armKey);
+  });
+
+  // Batches CQ decodes matching an armed box for a short window so that
+  // when more than one armed DXCC/band calls CQ at effectively the same
+  // moment (the same FT8 cycle's decodes all arrive within a second or so
+  // of each other), only the strongest signal gets answered -- the radio
+  // can only transmit one reply per cycle anyway, and the strongest one is
+  // the most likely to actually complete.
+  const CQ_BATCH_WINDOW_MS = 1500;
+  let pendingCqBatch = [];
+  let pendingCqTimer = null;
+
+  function maybeAutoAnswerCq(ev) {
+    if (!ev.is_cq || !ev.call || !ev.dxcc_name) return;
+    const key = armKeyFor(ev.dxcc_name, ev.band);
+    const arm = armStateFor(key);
+    if (!arm) return;
+    const evBandStatus = ev.entity_status && ev.entity_status.band;
+    if (arm.startedNone && evBandStatus && evBandStatus !== 'none') {
+      // Contact already made on this dxcc+band -- disarm instead of calling again.
+      armedBoxes.delete(key);
+      clearChaseStateForBox(key);
+      renderAll();
+      return;
+    }
+    if (isBlacklisted(key, ev.call)) return;
+    pendingCqBatch.push(ev);
+    if (pendingCqTimer) return;
+    pendingCqTimer = setTimeout(async () => {
+      const batch = pendingCqBatch;
+      pendingCqBatch = [];
+      pendingCqTimer = null;
+      if (batch.length === 0) return;
+      // Re-check give-up state at fire time too -- a candidate could have
+      // just hit the threshold from a different batch while this one was
+      // still pending (the window is short, but cheap to guard anyway).
+      const eligible = batch.filter(c => !isBlacklisted(armKeyFor(c.dxcc_name, c.band), c.call));
+      if (eligible.length === 0) return;
+      let best = eligible[0];
+      for (const c of eligible) {
+        if ((c.snr ?? -999) > (best.snr ?? -999)) best = c;
+      }
+      startAutoChaseTracking(armKeyFor(best.dxcc_name, best.band), best.call);
+      await ensureScanNotRunning();
+      tuneAndCall(best);
+    }, CQ_BATCH_WINDOW_MS);
+  }
+
+  // -- Auto-answer real-transmission tracking ------------------------------
+  // sendReply() arms WSJT-X's own Enable Tx and hands control to WSJT-X,
+  // which then keeps re-transmitting the *same* message every Tx cycle on
+  // its own -- automatically, with no further action from us -- until the
+  // exchange progresses or something explicitly turns Tx off. That's fine
+  // for a manual double-click (a human is watching and will stop it), but
+  // auto-answer removes that supervision entirely. Confirmed live
+  // 2026-09-22: a single incoming CQ triggered exactly one sendReply(), and
+  // WSJT-X then transmitted "GW0BNN VK2TDS QF55" 5 times entirely on its
+  // own before anything stopped it -- counting incoming CQ triggers (an
+  // earlier version of this logic) never got a chance to matter, since
+  // there was only ever one triggering CQ to count. This tracks *real*
+  // over-the-air Tx cycles instead (WSJT-X's
+  // own Status broadcasts), and force-sends Halt Tx after
+  // CHASE_GIVE_UP_AFTER_REPLIES *identical, non-progressing* transmissions
+  // -- the actual fix for "stop after three transmissions if you don't hear
+  // anything back", not just capping how many times we *ask* to transmit.
+  // A changed tx_message (the exchange actually progressing -- report
+  // exchanged, RRR/73 sent) resets the count rather than counting toward
+  // give-up, so a real QSO in progress is never cut off.
+  let activeAutoChase = null; // { armKeyComponent, call, lastMessage, repeatCount, wasTransmitting }
+
+  function startAutoChaseTracking(armKeyComponent, call) {
+    activeAutoChase = { armKeyComponent, call, lastMessage: null, repeatCount: 0, wasTransmitting: false };
+  }
+
+  function haltAutoChaseAndGiveUp() {
+    if (!activeAutoChase) return;
+    const { armKeyComponent, call } = activeAutoChase;
+    activeAutoChase = null;
+    const key = chaseKeyFor(armKeyComponent, call);
+    chaseState.set(key, { replyCount: CHASE_GIVE_UP_AFTER_REPLIES, blacklisted: true, blacklistedAt: Date.now() });
+    postJson('/remote/halt_tx', { auto_tx_only: true }).catch(() => {});
+    renderAll();
+  }
+
+  function trackAutoChaseTransmission(statusEv) {
+    if (!activeAutoChase) return;
+    const isTransmitting = !!statusEv.transmitting;
+    const startedTransmitting = isTransmitting && !activeAutoChase.wasTransmitting;
+    activeAutoChase.wasTransmitting = isTransmitting;
+    if (!startedTransmitting) return;
+    if (statusEv.dx_call !== activeAutoChase.call) {
+      // WSJT-X is now calling someone/something else -- a different
+      // auto-answer fire, or a human took over manually. This tracking no
+      // longer applies to whatever it's doing now.
+      activeAutoChase = null;
+      return;
+    }
+    const message = (statusEv.tx_message || '').trim();
+    if (message && message === activeAutoChase.lastMessage) {
+      activeAutoChase.repeatCount += 1;
+    } else {
+      activeAutoChase.lastMessage = message;
+      activeAutoChase.repeatCount = 1;
+    }
+    if (activeAutoChase.repeatCount >= CHASE_GIVE_UP_AFTER_REPLIES) {
+      haltAutoChaseAndGiveUp();
+    }
+  }
 
   fetch('/live/config').then(r => r.json()).then(data => {
     if (data.wsjtx_status && Object.keys(data.wsjtx_status).length) { applyStatus(data.wsjtx_status); renderAll(); }
@@ -616,7 +963,7 @@ function mountLiveEntities(root, ctx, widgetMode) {
     dot.className = connected ? 'up' : 'down';
     connText.textContent = connected ? 'connected' : 'disconnected -- retrying...';
   }));
-  unsubs.push(ctx.on('decode', ev => { handleDecode(ev); renderAll(); }));
+  unsubs.push(ctx.on('decode', ev => { maybeAutoAnswerCq(ev); handleDecode(ev); renderAll(); }));
   unsubs.push(ctx.on('status', ev => { applyStatus(ev); renderAll(); }));
   // See the dblclick handler's own comment above for why this exists:
   // Find/Scan and the double-click that wants it out of the way can be in
@@ -1174,6 +1521,16 @@ function mountLiveEntities(root, ctx, widgetMode) {
     // no-op if nothing's running (cancelScan() is idempotent: Cancel is
     // already disabled once a scan finishes or was never started).
     if (!findCancelBtn.disabled) cancelScan();
+    // Same concern for auto-answer arming: a pending batch timer left
+    // running past unmount would fire tuneAndCall() (retune + transmit)
+    // against a now-detached instance's stale elements/closures. Clearing
+    // armedBoxes too so a remount starts fully disarmed rather than
+    // silently inheriting stale arm state.
+    if (pendingCqTimer) { clearTimeout(pendingCqTimer); pendingCqTimer = null; }
+    pendingCqBatch = [];
+    armedBoxes.clear();
+    chaseState.clear();
+    activeAutoChase = null;
   };
 }
 

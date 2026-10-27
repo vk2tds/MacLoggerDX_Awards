@@ -50,6 +50,7 @@ run_simple_module("test_qsl_helper", skip={
 })
 run_simple_module("test_live_monitor_reply")
 run_simple_module("test_live_monitor_grid_memory")
+run_simple_module("test_live_monitor_logbook_callbacks")
 run_simple_module("test_radio_control_watchdog")
 run_simple_module("test_qso_queue")
 run_simple_module("test_macloggerdx_bridge")

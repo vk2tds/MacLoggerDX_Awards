@@ -76,6 +76,10 @@ live_monitor.init_live_monitor(app, sock, live_monitor.LiveMonitorConfig(
     udp_port=2237,
     multicast_group="224.0.0.1",
 ))
+# DXCC Challenge has no live-update mechanism of its own (unlike DX Monitor) --
+# reuse the same logbook-mtime watchdog thread so it also refreshes without
+# a manual "Refresh" click.
+live_monitor.get_monitor().add_logbook_change_callback(refresh)
 
 audio_spectrum.init_audio_spectrum()
 

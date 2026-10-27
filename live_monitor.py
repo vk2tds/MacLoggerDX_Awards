@@ -108,7 +108,7 @@ class LiveMonitorConfig:
     # band with lots of simultaneous decodes it could be exhausted within a
     # couple of minutes, so a tab reload after being away just 10-15 minutes
     # could lose everything older than that. Bumped up to comfortably cover
-    # a good chunk of DX Monitor's 90-minute activity-box window even on a
+    # a good chunk of DX Monitor's 36-minute activity-box window even on a
     # busy multi-signal band (confirmed live 2026-08-02 this was the actual
     # cause of a reported "history just disappeared" complaint -- the app
     # process itself had been running continuously the whole time, so it
@@ -166,6 +166,14 @@ class LiveMonitor:
         # soon as a grid-less follow-up decode arrives -- confirmed live
         # 2026-09-01 with VK0DS on 15M reverting to "Heard I." mid-QSO.
         self._last_grid_by_call: dict = {}
+
+        # Zero-arg callbacks to run on the logbook watchdog thread whenever
+        # the logbook file's mtime changes -- e.g. app.py registers its own
+        # refresh() here so the DXCC Challenge grid (which has no live-update
+        # mechanism of its own, unlike DX Monitor) picks up new QSOs/
+        # confirmations without a manual "Refresh" click. See
+        # add_logbook_change_callback() and _logbook_watchdog_loop() below.
+        self._logbook_change_callbacks: list = []
 
         self._clients_lock = threading.Lock()
         self._clients: list = []
@@ -374,17 +382,34 @@ class LiveMonitor:
         except OSError:
             return None
 
+    def add_logbook_change_callback(self, fn):
+        """Register a zero-arg callback to run on this same watchdog thread
+        whenever the logbook file's mtime changes, right after DX Monitor's
+        own status refresh. A callback that raises is logged and skipped --
+        it must not stop DX Monitor's own refresh, or any other registered
+        callback, from running."""
+        self._logbook_change_callbacks.append(fn)
+
+    def _logbook_watchdog_tick(self):
+        mtime = self._logbook_mtime()
+        if mtime is None or mtime == self._logbook_mtime_seen:
+            return
+        self._logbook_mtime_seen = mtime
+        try:
+            self._refresh_dx_history_status()
+        except Exception:
+            log.exception("Error refreshing DX Monitor status after a logbook change")
+        for fn in self._logbook_change_callbacks:
+            try:
+                fn()
+            except Exception:
+                log.exception("Logbook-change callback %r failed", fn)
+
     def _logbook_watchdog_loop(self):
         self._logbook_mtime_seen = self._logbook_mtime()
         while True:
             time.sleep(self.LOGBOOK_POLL_INTERVAL_S)
-            mtime = self._logbook_mtime()
-            if mtime is not None and mtime != self._logbook_mtime_seen:
-                self._logbook_mtime_seen = mtime
-                try:
-                    self._refresh_dx_history_status()
-                except Exception:
-                    log.exception("Error refreshing DX Monitor status after a logbook change")
+            self._logbook_watchdog_tick()
 
     def _refresh_dx_history_status(self):
         """Recomputes status for every call+band DX Monitor currently knows
@@ -440,13 +465,56 @@ class LiveMonitor:
         have a better last-known grid for this call (this decode's own
         message carried none) can pass it separately, since `grid`/
         `is_new_grid`/`grid_status_scopes` below must still reflect what
-        *this* decode actually carried, not a stale fallback."""
+        *this* decode actually carried, not a stale fallback.
+
+        DXCC resolution deliberately uses the raw `call`, not `base`.
+        `base` (ft8_parser.base_callsign()) strips a compound call down to
+        the operator's *home* identity -- e.g. "W6/UT5UF" -> "UT5UF" -- which
+        is correct for "have I worked this operator before" but wrong for
+        DXCC: a UT5UF operator signing "W6/UT5UF" is operating from the USA
+        right now, not Ukraine. dxcc_lookup.DxccResolver.lookup() already
+        handles the compound form itself (it takes the prefix side of the
+        slash), so feeding it the already-stripped base defeats that and
+        silently resolves to the operator's home country instead. Confirmed
+        live 2026-09-17: W6/UT5UF was grouped under "Ukraine" on DX Monitor
+        instead of USA."""
         if entity_grid is None:
             entity_grid = grid
         entity = None
-        if self.dxcc_resolver is not None and (base or call):
-            entity = self.dxcc_resolver.lookup(base or call, grid=entity_grid)
-        db_status = self.status_checker.lookup(call, base_callsign=base, band=band, mode=mode) if call else None
+        if self.dxcc_resolver is not None and (call or base):
+            entity = self.dxcc_resolver.lookup(call or base, grid=entity_grid)
+        # A compound call operating from a *different* DXCC entity than the
+        # operator's home one (VK9/VK2DAG = Christmas I., not Australia) must
+        # only match logbook rows for that exact call -- falling back to the
+        # base call would count the operator's home-country QSOs as if they
+        # were this entity, painting the callsign "worked" while the entity
+        # heading (correctly) says never worked (confirmed live 2026-10-16:
+        # VK9/VK2DAG purple under a red "Christmas I." box). Plain /P, /M
+        # style suffixes resolve to the same entity as the base and still
+        # fall back to it.
+        status_base = base
+        if self.dxcc_resolver is not None and call and base and call != base and entity is not None:
+            base_entity = self.dxcc_resolver.lookup(base, grid=entity_grid)
+            if base_entity is not None and base_entity.dxcc_id != entity.dxcc_id:
+                status_base = None
+        db_status = self.status_checker.lookup(call, base_callsign=status_base, band=band, mode=mode) if call else None
+
+        # Several prefixes are shared by more than one DXCC entity (e.g. bare
+        # "FO" = Austral/Clipperton/French Polynesia/Marquesas), which a
+        # prefix table can't tell apart -- but MacLoggerDX already knows which
+        # one a callsign we've worked actually is. Trust the logbook over the
+        # prefix guess, otherwise the box heading (entity status) and the
+        # callsign colour (per-call status) describe different entities
+        # (confirmed live 2026-10-16: FO5QB shown as "Austral I." in red
+        # while the call itself was correctly purple as French Polynesia).
+        # Not for compound calls (W6/UT5UF): the logbook knows the operator's
+        # home entity there, but the operating-location prefix is what counts.
+        if (db_status and db_status.dxcc_id and call and "/" not in call
+                and self.dxcc_resolver is not None
+                and (entity is None or entity.dxcc_id != db_status.dxcc_id)):
+            logged = next((e for e in self.dxcc_resolver.entities if e.dxcc_id == db_status.dxcc_id), None)
+            if logged is not None:
+                entity = logged
 
         is_new_dxcc = None
         dxcc_id_for_flag = entity.dxcc_id if entity else (db_status.dxcc_id if db_status else None)

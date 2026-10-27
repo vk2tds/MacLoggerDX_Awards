@@ -79,6 +79,14 @@ function mountRadioControl(root, ctx, widgetMode) {
     }).then(r => r.json());
   }
 
+  const splitAllowedBox = root.getElementById('split-allowed');
+  const splitReadout = root.getElementById('split-readout');
+  if (splitAllowedBox) {
+    splitAllowedBox.addEventListener('change', () => {
+      postJson('/radio/split', { allowed: splitAllowedBox.checked }).catch(() => {});
+    });
+  }
+
   function renderStatus(s) {
     if (!s.connected) {
       connDot.className = 'dot down';
@@ -107,6 +115,11 @@ function mountRadioControl(root, ctx, widgetMode) {
     smeterFill.style.width = meter.pct + '%';
     smeterLabel.textContent = s.strength_error ? 'S-meter: unavailable' : meter.label;
 
+    if (splitAllowedBox) {
+      splitAllowedBox.checked = !!s.split_allowed;
+      splitReadout.textContent = s.split === true ? 'Split is ON' : (s.split === false ? 'Split is off' : '');
+      splitReadout.style.color = (s.split === true && !s.split_allowed) ? '#c62828' : '';
+    }
     if (!ritFocused) ritInput.value = s.rit_hz ?? 0;
     if (!xitFocused) xitInput.value = s.xit_hz ?? 0;
     if (s.rfpower_watts !== null && s.rfpower_watts !== undefined) {
@@ -258,7 +271,24 @@ function mountRadioControl(root, ctx, widgetMode) {
   });
 
   function renderProcStatus(s) {
-    if (s.managed_running) {
+    // rigctld itself gives no sign when its USB-serial device has vanished
+    // (unplugged, rig powered off, or macOS renumbered it) -- it keeps
+    // running and listening fine, so every real command just times out
+    // with no visible cause. device_exists checks the configured path
+    // directly, so this shows up instantly instead of only surfacing once
+    // someone notices frequency/S-meter readouts have stopped updating.
+    // Confirmed live 2026-09-22/23: this exact scenario happened twice in
+    // two days with no warning here at all.
+    const deviceMissing = s.device_exists === false;
+    if (s.managed_running && deviceMissing) {
+      procDot.className = 'dot warn';
+      procText.textContent = `Running (PID ${s.managed_pid}), but the serial device `
+        + `${s.config && s.config.device ? s.config.device : ''} is missing -- check the USB connection`;
+    } else if (s.external_running && deviceMissing) {
+      procDot.className = 'dot warn';
+      procText.textContent = `Running (started outside this app), but the serial device `
+        + `${s.config && s.config.device ? s.config.device : ''} is missing -- check the USB connection`;
+    } else if (s.managed_running) {
       procDot.className = 'dot up';
       procText.textContent = `Running (PID ${s.managed_pid}, started by this app)`;
     } else if (s.external_running) {
@@ -274,6 +304,11 @@ function mountRadioControl(root, ctx, widgetMode) {
     procStopBtn.disabled = !s.managed_running;
     procRestartBtn.disabled = !s.managed_running;
     procStartBtn.disabled = s.managed_running || s.external_running;
+    // Same signal, shown right at the field you'd actually go fix -- an
+    // amber outline on the Serial device input itself, not just the status
+    // line above, so it's visible even if you've scrolled past the dot.
+    procDevice.style.outline = deviceMissing ? '2px solid #e6a817' : '';
+    procDevice.title = deviceMissing ? 'This device is not currently present -- pick from the list or check the connection' : '';
   }
 
   function pollProcStatus() {
